@@ -1,0 +1,16 @@
+---
+alwaysApply: false
+---
+Project: CPU-only local RAG platform (monorepo).
+Goal: client-facing web app (Streamlit) with future external API (FastAPI).
+LLM: local via Ollama (llama3:8b/llama3.1:8b). No data leaves LAN.
+Embeddings: BGE-M3 (Ollama/ONNX). Vector store: Postgres + pgvector (HNSW).
+Docs: PDF (vector/scan), DOCX, XLSX, HTML, E-mail, images. OCR required (RU/EN). Handle rotations 0/90/180/270. Extract tables with structural unity (Camelot/Tabula for vector PDFs; PaddleOCR PP-Structure for scans).
+Pipelines: Airflow schedules only (no watch). DAG = ingest → parse/OCR → tables → chunk → embed → upsert (pgvector) → metrics to ClickHouse.
+Dashboards: Apache Superset on ClickHouse (quality/latency/usage).
+API (v1): /upload, /search, /answer (with citations), /feedback, /webhook/ingest.
+Security: ACL/tenants/roles in Postgres; retrieval filters respect ACL.
+CI/CD: GitHub Actions → build & push images to GHCR, deploy via Docker Compose. GitLab CI config scaffolded.
+Secrets: .env files (with .env.example).
+Repo layout: apps/{streamlit_app,api}; packages/rag_core (parse/OCR/tables/vectorstore/ranking); pipelines/airflow; infra/compose; db/{postgres,clickhouse}; superset/; llm/ollama/; configs/.
+Optional: enable reranker (bge-reranker-v2-m3) on top-k=20 → top-3 if retrieval precision is insufficient.

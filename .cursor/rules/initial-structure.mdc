@@ -1,0 +1,68 @@
+---
+alwaysApply: false
+---
+rag-platform/
+  apps/
+    streamlit_app/                # клиентский UI (RAG чат, поиск, предпросмотр док-та, загрузка)
+      src/
+        pages/
+        components/
+        services/                 # HTTP-клиенты к api/ и системам
+      pyproject.toml
+    api/                           # FastAPI (REST) — search, answer, citations, feedback, upload, webhooks
+      src/
+        routers/
+        services/
+          rag_pipeline.py          # ретрив, (опц.) rerank, генерация ответа + цитаты
+          chunking.py              # правила разбиения
+          embeddings.py            # локальные эмбеддинги (через Ollama или HF/ONNX)
+          authorization.py         # ACL/роли/тенанты
+        schemas/
+        settings.py
+      pyproject.toml
+  packages/
+    rag_core/                      # переиспользуемая логика ingest/parse/OCR/tables/retreival
+      rag_core/
+        parsers/                   # pdf/docx/xlsx/html/eml, маршрутизация по типам
+        ocr/                       # Tesseract/PaddleOCR; авто-повороты 0/90/180/270
+        tables/                    # Camelot/Tabula/PP-StructureV3; единое дерево таблицы
+        vectorstore/               # pgvector обвязка (upsert/search/HNSW)
+        ranking/                   # (опц.) bge-reranker для top-k
+        utils/
+      pyproject.toml
+  pipelines/
+    airflow/
+      dags/
+        ingest_documents_dag.py     # загрузка -> нормализация -> chunk -> embed -> upsert (pgvector)
+        sync_clickhouse_metrics_dag.py
+        backfill_tables_from_docs_dag.py
+      plugins/                      # собственные операторы/сенсоры (S3/FS; почта; DLP/ACL)
+      requirements.txt
+  infra/
+    compose/
+      docker-compose.yml            # все сервисы + профили cpu-only
+      .env.example
+    db/
+      postgres/init/                # enable pgvector, схемы метаданных/ACL
+        00_extensions.sql
+        10_schema.sql
+      clickhouse/init/
+        00_schema.sql               # события/метрики RAG, лог запросов, качество
+    superset/
+      superset_config.py            # метабаза → Postgres; импорт ролей/дашбордов
+      bootstrap/
+    llm/
+      ollama/                       # конфиг, список моделей (llama3:8b, bge-m3 и т.п.)
+      README.md
+  configs/
+    app.toml                        # параметры RAG (chunk_size, overlap, модели, top_k, top_rerank)
+  tests/
+  scripts/                          # utility: миграции, бэкапы, профайлинг
+  .github/workflows/
+    ci.yml                          # linters+tests
+    cd.yml                          # сборка+push в GHCR, деплой compose
+  .gitlab-ci.yml                    # зеркальный пайплайн (на будущее)
+  .env.example
+  pyproject.toml                    # общий менеджер (uv/poetry/pip-tools)
+  Makefile
+  .gitignore

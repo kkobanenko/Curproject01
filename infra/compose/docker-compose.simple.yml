@@ -1,0 +1,120 @@
+version: "3.8"
+
+services:
+  postgres:
+    image: pgvector/pgvector:pg16
+    container_name: rag-platform-postgres
+    environment:
+      TZ: Europe/Dublin
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: rag_app
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./../db/postgres/init:/docker-entrypoint-initdb.d
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    container_name: rag-platform-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redisdata:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  clickhouse:
+    image: clickhouse/clickhouse-server:24.8
+    container_name: rag-platform-clickhouse
+    environment:
+      TZ: Europe/Dublin
+      CLICKHOUSE_DB: rag
+    ports:
+      - "8123:8123"
+      - "9000:9000"
+    volumes:
+      - chdata:/var/lib/clickhouse
+      - ./../db/clickhouse/init:/docker-entrypoint-initdb.d
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:8123/ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  ollama:
+    image: ollama/ollama:latest
+    container_name: rag-platform-ollama
+    environment:
+      TZ: Europe/Dublin
+      OLLAMA_HOST: 0.0.0.0
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama:/root/.ollama
+    command: ["serve"]
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:11434/api/tags"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  api:
+    build:
+      context: ./../../apps/api
+      dockerfile: Dockerfile
+    container_name: rag-platform-api
+    environment:
+      TZ: Europe/Dublin
+      APP_ENV: production
+      OLLAMA_BASE_URL: http://ollama:11434
+      PG_DSN: postgresql://postgres:postgres@postgres:5432/rag_app
+      REDIS_URL: redis://redis:6379/1
+      CLICKHOUSE_URL: http://clickhouse:8123
+      CONFIG_PATH: /app/configs/app.toml
+    depends_on:
+      - postgres
+      - ollama
+    volumes:
+      - ./../../configs:/app/configs
+      - ./../../packages/rag_core:/app/rag_core
+    ports:
+      - "8081:8081"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  streamlit:
+    build:
+      context: ./../../apps/streamlit_app
+      dockerfile: Dockerfile
+    container_name: rag-platform-streamlit
+    environment:
+      TZ: Europe/Dublin
+      API_BASE_URL: http://api:8080
+    depends_on:
+      - api
+    ports:
+      - "8501:8501"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8501/_stcore/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+volumes:
+  pgdata:
+  redisdata:
+  chdata:
+  ollama:

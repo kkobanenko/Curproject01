@@ -1,0 +1,258 @@
+version: "3.9"
+name: ${PROJECT_NAME:-rag-platform}
+
+x-env: &default-env
+  TZ: ${TZ:-Europe/Dublin}
+
+services:
+  postgres:
+    image: pgvector/pgvector:pg16-bookworm
+    container_name: ${PROJECT_NAME:-rag-platform}-postgres
+    environment:
+      <<: *default-env
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+      POSTGRES_DB: ${POSTGRES_DB:-rag_app}
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./../db/postgres/init:/docker-entrypoint-initdb.d
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    container_name: ${PROJECT_NAME:-rag-platform}-redis
+    ports:
+      - "${REDIS_PORT:-6379}:6379"
+    volumes:
+      - redisdata:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  clickhouse:
+    image: clickhouse/clickhouse-server:24.8
+    container_name: ${PROJECT_NAME:-rag-platform}-clickhouse
+    environment:
+      <<: *default-env
+      CLICKHOUSE_DB: ${CLICKHOUSE_DB:-rag}
+    ports:
+      - "8123:8123"
+      - "9000:9000"
+    volumes:
+      - chdata:/var/lib/clickhouse
+      - ./../db/clickhouse/init:/docker-entrypoint-initdb.d
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:8123/ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  superset:
+    build:
+      context: ./../superset
+      dockerfile: Dockerfile
+    container_name: ${PROJECT_NAME:-rag-platform}-superset
+    environment:
+      <<: *default-env
+      SUPERSET_SECRET_KEY: ${SUPERSET_SECRET_KEY:-CHANGE_ME_SUPERSET_SECRET}
+      SUPERSET_LOAD_EXAMPLES: "no"
+      SUPERSET_ENV: production
+      FLASK_APP: superset
+      SUPERSET_DATABASE_URI: postgresql+psycopg2://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@postgres:5432/${PG_SUPERSET_DB:-superset}
+    ports:
+      - "8088:8088"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    volumes:
+      - superset_home:/app/superset_home
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8088/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  ollama:
+    image: ollama/ollama:latest
+    container_name: ${PROJECT_NAME:-rag-platform}-ollama
+    environment:
+      <<: *default-env
+      OLLAMA_HOST: 0.0.0.0
+    ports:
+      - "${OLLAMA_PORT:-11434}:11434"
+    volumes:
+      - ollama:/root/.ollama
+    command: ["serve"]
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:11434/api/tags"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  airflow-init:
+    build:
+      context: ./../../pipelines/airflow
+      dockerfile: Dockerfile
+    container_name: ${PROJECT_NAME:-rag-platform}-airflow-init
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      <<: *default-env
+      AIRFLOW__CORE__EXECUTOR: ${AIRFLOW_EXECUTOR:-CeleryExecutor}
+      AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@postgres:5432/${PG_AIRFLOW_DB:-airflow}
+      AIRFLOW__CELERY__BROKER_URL: redis://redis:6379/0
+      AIRFLOW__CELERY__RESULT_BACKEND: db+postgresql+psycopg2://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@postgres:5432/${PG_AIRFLOW_DB:-airflow}
+    volumes:
+      - ./../../packages/rag_core:/opt/airflow/rag_core
+      - ./../../pipelines/airflow/dags:/opt/airflow/dags
+      - ./../../pipelines/airflow/requirements.txt:/requirements.txt
+      - ${INBOX_HOSTDIR:-../../data/inbox}:/opt/airflow/inbox
+    entrypoint: ["bash", "-c"]
+    command: |
+      pip install --no-cache-dir -r /requirements.txt && \
+      airflow db migrate && \
+      airflow users create --username ${AIRFLOW_USER:-airflow} --password ${AIRFLOW_PASSWORD:-airflow} --firstname admin --lastname user --role Admin --email admin@example.com || true
+
+  airflow-webserver:
+    build: { context: ./../../pipelines/airflow, dockerfile: Dockerfile }
+    container_name: ${PROJECT_NAME:-rag-platform}-airflow-web
+    depends_on:
+      airflow-init:
+        condition: service_completed_successfully
+    environment:
+      <<: *default-env
+      AIRFLOW__CORE__EXECUTOR: ${AIRFLOW_EXECUTOR:-CeleryExecutor}
+      AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@postgres:5432/${PG_AIRFLOW_DB:-airflow}
+      AIRFLOW__CELERY__BROKER_URL: redis://redis:6379/0
+      AIRFLOW__CELERY__RESULT_BACKEND: db+postgresql+psycopg2://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@postgres:5432/${PG_AIRFLOW_DB:-airflow}
+      PG_DSN: postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@postgres:5432/${PG_RAG_DB:-rag_app}
+    ports: ["8080:8080"]
+    command: ["airflow", "webserver"]
+    volumes:
+      - ./../../packages/rag_core:/opt/airflow/rag_core
+      - ./../../pipelines/airflow/dags:/opt/airflow/dags
+      - ${INBOX_HOSTDIR:-../../data/inbox}:/opt/airflow/inbox
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  airflow-scheduler:
+    build: { context: ./../../pipelines/airflow, dockerfile: Dockerfile }
+    container_name: ${PROJECT_NAME:-rag-platform}-airflow-scheduler
+    depends_on:
+      airflow-init:
+        condition: service_completed_successfully
+    environment:
+      <<: *default-env
+      AIRFLOW__CORE__EXECUTOR: ${AIRFLOW_EXECUTOR:-CeleryExecutor}
+      AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@postgres:5432/${PG_AIRFLOW_DB:-airflow}
+      AIRFLOW__CELERY__BROKER_URL: redis://redis:6379/0
+      AIRFLOW__CELERY__RESULT_BACKEND: db+postgresql+psycopg2://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@postgres:5432/${PG_AIRFLOW_DB:-airflow}
+      PG_DSN: postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@postgres:5432/${PG_RAG_DB:-rag_app}
+    command: ["airflow", "scheduler"]
+    volumes:
+      - ./../../packages/rag_core:/opt/airflow/rag_core
+      - ./../../pipelines/airflow/dags:/opt/airflow/dags
+      - ${INBOX_HOSTDIR:-../../data/inbox}:/opt/airflow/inbox
+
+  airflow-worker:
+    build: { context: ./../../pipelines/airflow, dockerfile: Dockerfile }
+    container_name: ${PROJECT_NAME:-rag-platform}-airflow-worker
+    depends_on:
+      airflow-init:
+        condition: service_completed_successfully
+    environment:
+      <<: *default-env
+      AIRFLOW__CORE__EXECUTOR: ${AIRFLOW_EXECUTOR:-CeleryExecutor}
+      AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@postgres:5432/${PG_AIRFLOW_DB:-airflow}
+      AIRFLOW__CELERY__BROKER_URL: redis://redis:6379/0
+      AIRFLOW__CELERY__RESULT_BACKEND: db+postgresql+psycopg2://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@postgres:5432/${PG_AIRFLOW_DB:-airflow}
+      PG_DSN: postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@postgres:5432/${PG_RAG_DB:-rag_app}
+    command: ["airflow", "celery", "worker"]
+    volumes:
+      - ./../../packages/rag_core:/opt/airflow/rag_core
+      - ./../../pipelines/airflow/dags:/opt/airflow/dags
+      - ${INBOX_HOSTDIR:-../../data/inbox}:/opt/airflow/inbox
+
+  airflow-triggerer:
+    build: { context: ./../../pipelines/airflow, dockerfile: Dockerfile }
+    container_name: ${PROJECT_NAME:-rag-platform}-airflow-triggerer
+    depends_on:
+      airflow-init:
+        condition: service_completed_successfully
+    environment:
+      <<: *default-env
+      AIRFLOW__CORE__EXECUTOR: ${AIRFLOW_EXECUTOR:-CeleryExecutor}
+      AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@postgres:5432/${PG_AIRFLOW_DB:-airflow}
+      PG_DSN: postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@postgres:5432/${PG_RAG_DB:-rag_app}
+    command: ["airflow", "triggerer"]
+    volumes:
+      - ${INBOX_HOSTDIR:-../../data/inbox}:/opt/airflow/inbox
+
+  api:
+    build:
+      context: ./../../apps/api
+      dockerfile: Dockerfile
+    container_name: ${PROJECT_NAME:-rag-platform}-api
+    environment:
+      <<: *default-env
+      APP_ENV: production
+      OLLAMA_BASE_URL: http://ollama:11434
+      PG_DSN: postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@postgres:5432/${PG_RAG_DB:-rag_app}
+      REDIS_URL: redis://redis:6379/1
+      CLICKHOUSE_URL: http://clickhouse:8123
+      CONFIG_PATH: /app/configs/app.toml
+    depends_on:
+      postgres:
+        condition: service_healthy
+      ollama:
+        condition: service_healthy
+    volumes:
+      - ./../../configs:/app/configs
+      - ./../../packages/rag_core:/app/rag_core
+    ports:
+      - "${API_PORT:-8081}:8080"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  streamlit:
+    build:
+      context: ./../../apps/streamlit_app
+      dockerfile: Dockerfile
+    container_name: ${PROJECT_NAME:-rag-platform}-streamlit
+    environment:
+      <<: *default-env
+      API_BASE_URL: http://api:8080
+    depends_on:
+      api:
+        condition: service_healthy
+    ports:
+      - "${STREAMLIT_PORT:-8501}:8501"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8501/_stcore/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+volumes:
+  pgdata:
+  redisdata:
+  chdata:
+  superset_home:
+  ollama:

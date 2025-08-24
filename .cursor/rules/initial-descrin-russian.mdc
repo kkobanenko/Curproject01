@@ -1,0 +1,123 @@
+---
+description:
+globs:
+alwaysApply: false
+---
+Сервисы в docker-compose.yml (CPU-only)
+
+ollama (LLM + локальные эмбеддинги/инференс) 
+GitHub
+ollama.readthedocs.io
+Ollama
+
+postgres (+pgvector) для метаданных/ACL и векторного поиска 
+GitHub
+Neon
+
+redis (кэш/очереди)
+
+airflow-webserver, airflow-scheduler, airflow-worker, airflow-triggerer (ingest/наполнение БД) 
+Apache Airflow
++1
+
+clickhouse (OLAP-хранилище событий/метрик) 
+ClickHouse
++1
+
+superset (дашборды качества/нагрузки/статистики) 
+superset.apache.org
++1
+
+api (FastAPI)
+
+streamlit (клиентский фронтенд)
+
+2) Векторное хранилище
+
+PostgreSQL + pgvector — оптимально и экономично при “тысячах документов”, единый бэкап-контур, индексы HNSW для быстрого ANN-поиска. Рекомендации: размер эмбеддинга 384–768; для HNSW настраивать m, ef_construction, ef_search (выше m при онлайн-поиске); периодический VACUUM ANALYZE. 
+GitHub
+Crunchy Data
+TigerData
+
+3) LLM и эмбеддинги (локально, CPU)
+
+LLM: llama3:8b/llama3.1:8b в Ollama (квантизация Q4, контекст 8k; вариант с длинным контекстом — llama3-gradient 1M+). 
+Ollama
++2
+Ollama
++2
+
+Эмбеддинги: BGE-M3 (мультиязычный, доступен и через Ollama) или его ONNX-вариант для CPU. 
+Hugging Face
+Ollama
+GitHub
+
+4) OCR и извлечение таблиц (повороты/структура)
+
+PDF (вектор): Camelot (lattice/stream) — устойчив к табличной разметке в линиях. 
+camelot-py.readthedocs.io
+Read the Docs
+
+PDF (сканы) / изображения: Tesseract для текста; PaddleOCR PP-StructureV3 для распознавания структуры таблиц (ячейки, объединения, вложенные элементы). Алгоритм: детекция страницы → нормализация ориентации (прогон 0/90/180/270, берём лучший скор) → сегментация таблиц → восстановление структуры (HTML/Markdown/CSV + координаты). 
+GitHub
++1
+Tesseract OCR
+paddlepaddle.github.io
+
+PDF (потоковый текст): tabula-py (обёртка над tabula-java). 
+tabula-py.readthedocs.io
++1
+
+Примечание: универсального “одного инструмента” для всех таблиц не существует; на практике комбинируем Camelot/Tabula для векторных PDF и PP-Structure для растров/сканов. 
+Stack Overflow
+
+5) Airflow: пайплайн загрузки
+
+DAG: ingest_documents_dag
+
+Watch-нет — по расписанию: “обнаружить новые файлы в хранилище” → 2) парсинг/конверсия (pdf/docx/xlsx/html/eml) → 3) OCR/deskew/autorotation → 4) извлечение таблиц (и текст, и структурные таблицы) → 5) чанкование (текст + табличные блоки) → 6) эмбеддинги (BGE-M3) → 7) upsert в pgvector (метаданные/ACL в Postgres) → 8) агрегации/витрины в ClickHouse → 9) обновление статистики качества (в ClickHouse) для Superset. 
+Apache Airflow
+
+6) API (первый этап)
+
+POST /upload (документы)
+
+POST /search (семантический поиск по эмбеддингам; фильтры по метаданным/ACL)
+
+POST /answer (RAG: retrieve → (опц.) rerank → generate; возвращаем цитаты с координатами)
+
+GET /citations/{id} (детальный просмотр источников)
+
+POST /feedback (оценка ответа/полезности)
+
+POST /webhook/ingest (вызов задач Airflow при необходимости)
+
+7) Роли/сегрегация доступа
+
+В Postgres — таблицы tenants, roles, doc_acl (доступ к документам/табличным блокам на уровне отдела/пользователя);
+
+В API — мидлварь авторизации, фильтрация ретрива по ACL (в запрос к pgvector добавляются ограничения).
+
+8) CI/CD (GitHub Actions → GHCR; деплой Compose)
+
+ci.yml: linters (ruff, black, mypy), unit-тесты, build колес/образов.
+
+cd.yml: сборка образов api, streamlit_app, airflow, rag_core → push в GHCR → ssh/actions-runner деплой docker compose up -d.
+
+.gitlab-ci.yml: зеркальный pipeline с теми же job’ами (на будущее).
+
+9) Требуемое ПО (Ubuntu 22.04)
+
+Docker Engine + Docker Compose v2; Git; Git LFS (если хранить веса/артефакты); Python 3.11+ (рекомендую uv/Poetry); make, pre-commit (hooks: ruff, black, mypy).
+
+Ollama (LLM/эмбеддинги локально) 
+GitHub
+
+Postgres 15+/pgvector; Redis; ClickHouse Server; Superset (через Docker Compose) 
+GitHub
+ClickHouse
+superset.apache.org
+
+Для OCR/таблиц: tesseract-ocr (+tesseract-ocr-rus/-eng), poppler-utils (pdfimages/pdftotext), Java (для Tabula), опц. LibreOffice headless для конвертации doc/xls → pdf. 
+GitHub
+Tesseract OCR
