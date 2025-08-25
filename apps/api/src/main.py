@@ -11,7 +11,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 import uvicorn
 
-from .routers import search, documents, chat
+from .routers import search_router, documents_router, chat_router
 from .services.rag_pipeline import RAGPipeline
 from .services.embeddings import EmbeddingService
 from .services.vectorstore import VectorStoreService
@@ -41,9 +41,9 @@ app.add_middleware(
 )
 
 # Подключение роутеров
-app.include_router(search.router, prefix="/api/v1", tags=["search"])
-app.include_router(documents.router, prefix="/api/v1", tags=["documents"])
-app.include_router(chat.router, prefix="/api/v1", tags=["chat"])
+app.include_router(search_router, prefix="/api/v1", tags=["search"])
+app.include_router(documents_router, prefix="/api/v1", tags=["documents"])
+app.include_router(chat_router, prefix="/api/v1", tags=["chat"])
 
 @app.on_event("startup")
 async def startup_event():

@@ -1,30 +1,141 @@
+# RAG Platform Configuration
+
 [app]
 name = "RAG Platform"
 version = "1.0.0"
-debug = false
+debug = true
+log_level = "INFO"
 
-[database]
-postgres_url = "postgresql://postgres:postgres@postgres:5432/rag_app"
-redis_url = "redis://redis:6379/1"
-clickhouse_url = "http://clickhouse:8123"
-
-[ollama]
-base_url = "http://ollama:11434"
-llm_model = "llama3:8b"
-embed_model = "bge-m3"
+[api]
+host = "0.0.0.0"
+port = 8081
+cors_origins = ["*"]
+max_upload_size = "100MB"
 
 [rag]
+# Настройки чанкинга
 chunk_size = 1000
 chunk_overlap = 200
-top_k = 20
-top_rerank = 5
-embedding_dim = 1024
+min_chunk_size = 100
+
+# Настройки поиска
+default_top_k = 20
+max_top_k = 100
+rerank_top_k = 3
+
+# Настройки контекста
+max_context_length = 4000
+context_overlap = 0.1
+
+[embeddings]
+# Модель по умолчанию
+default_model = "bge-m3"
+dimension = 1024
+
+# Настройки Ollama
+ollama_timeout = 30
+ollama_retries = 3
+
+[llm]
+# Модель по умолчанию
+default_model = "llama3:8b"
+max_tokens = 2048
+temperature = 0.7
+top_p = 0.9
+
+# Промпты
+system_prompt = """
+Ты - помощник для анализа документов. Отвечай на вопросы, используя только предоставленный контекст.
+Если в контексте нет информации для ответа, скажи об этом.
+Всегда указывай источники информации.
+"""
+
+[vectorstore]
+# Настройки PostgreSQL + pgvector
+connection_pool_size = 10
+max_connections = 20
+connection_timeout = 30
+
+# Настройки индексов
+hnsw_m = 16
+hnsw_ef_construction = 64
+hnsw_ef_search = 40
+
+[processing]
+# Поддерживаемые форматы
+supported_formats = [
+    "application/pdf",
+    "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    "text/html",
+    "text/plain",
+    "image/jpeg",
+    "image/png",
+    "image/tiff"
+]
+
+# OCR настройки
+ocr_languages = ["rus", "eng"]
+ocr_confidence_threshold = 0.6
+
+# Настройки таблиц
+table_extraction_methods = ["camelot", "tabula", "paddleocr"]
+prefer_vector_tables = true
 
 [security]
-secret_key = "CHANGE_ME_SECRET_KEY"
-algorithm = "HS256"
-access_token_expire_minutes = 30
+# Настройки ACL
+enable_acl = true
+default_tenant = "default"
+session_timeout = 3600
 
-[logging]
-level = "INFO"
-format = "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+# CORS
+allow_credentials = true
+allowed_methods = ["GET", "POST", "PUT", "DELETE", "OPTIONS"]
+
+[monitoring]
+# Метрики
+enable_metrics = true
+metrics_port = 9090
+
+# Логирование
+log_format = "json"
+log_rotation = "daily"
+max_log_size = "100MB"
+
+# Трейсинг
+enable_tracing = false
+tracing_endpoint = "http://localhost:14268/api/traces"
+
+[cache]
+# Redis настройки
+enable_cache = true
+default_ttl = 3600
+max_cache_size = "1GB"
+
+# Кэш эмбеддингов
+embedding_cache_ttl = 86400  # 24 часа
+embedding_cache_size = "100MB"
+
+[airflow]
+# Настройки Airflow
+dag_schedule = "*/15 * * * *"  # Каждые 15 минут
+max_active_runs = 3
+retry_delay = 300  # 5 минут
+
+# Настройки обработки
+batch_size = 10
+max_workers = 4
+timeout = 1800  # 30 минут
+
+[superset]
+# Настройки Superset
+enable_examples = false
+enable_telemetry = false
+refresh_interval = 300  # 5 минут
+
+# Дашборды по умолчанию
+default_dashboards = [
+    "rag_quality_metrics",
+    "system_performance",
+    "user_activity"
+]

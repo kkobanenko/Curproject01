@@ -1,7 +1,8 @@
-# Минимальные зависимости для быстрого старта
-# streamlit>=1.28.0
-# requests>=2.31.0
-# python-dotenv>=1.0.0
-# pandas>=2.0.0
-# plotly>=5.17.0
-# streamlit-option-menu>=0.3.6
+# Streamlit
+streamlit==1.28.1
+
+# HTTP клиент
+requests==2.31.0
+
+# Утилиты
+python-dotenv==1.0.0
