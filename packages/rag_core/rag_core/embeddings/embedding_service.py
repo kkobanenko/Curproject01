@@ -3,242 +3,227 @@
 Поддерживает Ollama для локальной генерации векторов
 """
 
-import os
+from __future__ import annotations
 import logging
-from typing import List, Dict, Any, Optional
-from dataclasses import dataclass
-import requests
+from typing import List, Dict, Any, Optional, Union
+import asyncio
 import json
+import requests
+from pathlib import Path
 
-@dataclass
-class EmbeddingResult:
-    """Результат генерации эмбеддинга"""
-    embedding: List[float]
-    model: str
-    usage: Dict[str, Any]
-    metadata: Optional[Dict[str, Any]] = None
+logger = logging.getLogger(__name__)
 
-class OllamaEmbeddingService:
-    """Сервис эмбеддингов через Ollama"""
+class EmbeddingService:
+    """Сервис для работы с эмбеддингами"""
     
-    def __init__(self, base_url: str = "http://localhost:11434", model: str = "bge-m3"):
+    def __init__(self, 
+                 model_name: str = "bge-m3",
+                 base_url: str = "http://localhost:11434",
+                 embedding_dim: int = 1024,
+                 batch_size: int = 32):
+        self.model_name = model_name
         self.base_url = base_url.rstrip('/')
-        self.model = model
-        self.session = requests.Session()
-        self.session.timeout = 30
-        
-        # Проверяем доступность Ollama
-        self._check_ollama_health()
+        self.embedding_dim = embedding_dim
+        self.batch_size = batch_size
+        self._check_ollama_connection()
     
-    def _check_ollama_health(self):
-        """Проверка доступности Ollama"""
+    def _check_ollama_connection(self):
+        """Проверяет подключение к Ollama"""
         try:
-            response = self.session.get(f"{self.base_url}/api/tags")
+            response = requests.get(f"{self.base_url}/api/tags", timeout=5)
             if response.status_code == 200:
                 models = response.json().get('models', [])
                 available_models = [model['name'] for model in models]
+                logger.info(f"Available Ollama models: {available_models}")
                 
-                if self.model not in available_models:
-                    logging.warning(f"Model {self.model} not found in Ollama. Available: {available_models}")
-                    # Пробуем использовать первую доступную модель
-                    if available_models:
-                        self.model = available_models[0]
-                        logging.info(f"Using available model: {self.model}")
-                else:
-                    logging.info(f"Ollama model {self.model} is available")
+                if self.model_name not in available_models:
+                    logger.warning(f"Model {self.model_name} not found in Ollama. Available: {available_models}")
             else:
-                logging.warning(f"Ollama health check failed: {response.status_code}")
-                
+                logger.error(f"Failed to connect to Ollama: {response.status_code}")
         except Exception as e:
-            logging.error(f"Error checking Ollama health: {e}")
-            raise ConnectionError(f"Cannot connect to Ollama at {self.base_url}")
+            logger.error(f"Error connecting to Ollama: {e}")
     
-    def generate_embedding(self, text: str) -> EmbeddingResult:
-        """Генерация эмбеддинга для одного текста"""
+    def get_embedding(self, text: str) -> List[float]:
+        """Получает эмбеддинг для одного текста"""
         try:
-            payload = {
-                "model": self.model,
-                "prompt": text,
-                "options": {
-                    "num_predict": 1,
-                    "temperature": 0.0,
-                    "top_p": 0.9,
-                    "repeat_penalty": 1.1
-                }
-            }
-            
-            response = self.session.post(
+            response = requests.post(
                 f"{self.base_url}/api/embeddings",
-                json=payload,
-                headers={"Content-Type": "application/json"}
+                json={
+                    "model": self.model_name,
+                    "prompt": text
+                },
+                timeout=30
             )
             
             if response.status_code == 200:
                 result = response.json()
+                embedding = result.get('embedding', [])
                 
-                return EmbeddingResult(
-                    embedding=result.get('embedding', []),
-                    model=self.model,
-                    usage={
-                        'prompt_tokens': len(text.split()),
-                        'total_tokens': len(text.split()),
-                        'model': self.model
-                    },
-                    metadata={
-                        'ollama_response': result
-                    }
-                )
+                if len(embedding) != self.embedding_dim:
+                    logger.warning(f"Expected embedding dimension {self.embedding_dim}, got {len(embedding)}")
+                
+                return embedding
             else:
-                error_msg = f"Ollama API error: {response.status_code} - {response.text}"
-                logging.error(error_msg)
-                raise RuntimeError(error_msg)
+                logger.error(f"Failed to get embedding: {response.status_code} - {response.text}")
+                raise Exception(f"Embedding API error: {response.status_code}")
                 
         except Exception as e:
-            logging.error(f"Error generating embedding: {e}")
+            logger.error(f"Error getting embedding: {e}")
             raise
     
-    def generate_embeddings_batch(self, texts: List[str], batch_size: int = 10) -> List[EmbeddingResult]:
-        """Генерация эмбеддингов для списка текстов"""
-        results = []
+    def get_embeddings_batch(self, texts: List[str]) -> List[List[float]]:
+        """Получает эмбеддинги для батча текстов"""
+        embeddings = []
         
         # Обрабатываем батчами для избежания перегрузки
-        for i in range(0, len(texts), batch_size):
-            batch = texts[i:i + batch_size]
-            batch_results = []
+        for i in range(0, len(texts), self.batch_size):
+            batch = texts[i:i + self.batch_size]
+            logger.debug(f"Processing batch {i//self.batch_size + 1}: {len(batch)} texts")
             
+            batch_embeddings = []
             for text in batch:
                 try:
-                    result = self.generate_embedding(text)
-                    batch_results.append(result)
+                    embedding = self.get_embedding(text)
+                    batch_embeddings.append(embedding)
                 except Exception as e:
-                    logging.error(f"Error generating embedding for text: {e}")
-                    # Создаем пустой эмбеддинг в случае ошибки
-                    empty_embedding = [0.0] * 1024  # BGE-M3 размер
-                    batch_results.append(EmbeddingResult(
-                        embedding=empty_embedding,
-                        model=self.model,
-                        usage={'error': str(e)},
-                        metadata={'error': True}
-                    ))
+                    logger.error(f"Error getting embedding for text: {e}")
+                    # Возвращаем нулевой вектор в случае ошибки
+                    batch_embeddings.append([0.0] * self.embedding_dim)
             
-            results.extend(batch_results)
-            
-            # Небольшая пауза между батчами
-            if i + batch_size < len(texts):
-                import time
-                time.sleep(0.1)
+            embeddings.extend(batch_embeddings)
         
-        return results
+        return embeddings
+    
+    async def get_embedding_async(self, text: str) -> List[float]:
+        """Асинхронно получает эмбеддинг для одного текста"""
+        loop = asyncio.get_event_loop()
+        return await loop.run_in_executor(None, self.get_embedding, text)
+    
+    async def get_embeddings_batch_async(self, texts: List[str]) -> List[List[float]]:
+        """Асинхронно получает эмбеддинги для батча текстов"""
+        tasks = [self.get_embedding_async(text) for text in texts]
+        embeddings = await asyncio.gather(*tasks, return_exceptions=True)
+        
+        # Обрабатываем ошибки
+        processed_embeddings = []
+        for i, embedding in enumerate(embeddings):
+            if isinstance(embedding, Exception):
+                logger.error(f"Error getting embedding for text {i}: {embedding}")
+                processed_embeddings.append([0.0] * self.embedding_dim)
+            else:
+                processed_embeddings.append(embedding)
+        
+        return processed_embeddings
+    
+    def get_embedding_dimension(self) -> int:
+        """Возвращает размерность эмбеддингов"""
+        return self.embedding_dim
+    
+    def is_model_available(self) -> bool:
+        """Проверяет доступность модели"""
+        try:
+            response = requests.get(f"{self.base_url}/api/tags", timeout=5)
+            if response.status_code == 200:
+                models = response.json().get('models', [])
+                available_models = [model['name'] for model in models]
+                return self.model_name in available_models
+            return False
+        except Exception:
+            return False
     
     def get_model_info(self) -> Dict[str, Any]:
-        """Получение информации о модели"""
+        """Получает информацию о модели"""
         try:
-            response = self.session.get(f"{self.base_url}/api/show", params={"name": self.model})
+            response = requests.get(f"{self.base_url}/api/show", 
+                                 json={"name": self.model_name}, 
+                                 timeout=10)
+            
             if response.status_code == 200:
                 return response.json()
             else:
                 return {"error": f"Failed to get model info: {response.status_code}"}
+                
         except Exception as e:
             return {"error": f"Error getting model info: {e}"}
     
-    def list_available_models(self) -> List[str]:
-        """Получение списка доступных моделей"""
-        try:
-            response = self.session.get(f"{self.base_url}/api/tags")
-            if response.status_code == 200:
-                models = response.json().get('models', [])
-                return [model['name'] for model in models]
-            else:
-                return []
-        except Exception as e:
-            logging.error(f"Error listing models: {e}")
-            return []
+    def calculate_similarity(self, embedding1: List[float], embedding2: List[float]) -> float:
+        """Вычисляет косинусное сходство между двумя эмбеддингами"""
+        if len(embedding1) != len(embedding2):
+            raise ValueError("Embeddings must have the same dimension")
+        
+        # Нормализуем векторы
+        norm1 = sum(x * x for x in embedding1) ** 0.5
+        norm2 = sum(x * x for x in embedding2) ** 0.5
+        
+        if norm1 == 0 or norm2 == 0:
+            return 0.0
+        
+        # Вычисляем косинусное сходство
+        dot_product = sum(x * y for x, y in zip(embedding1, embedding2))
+        similarity = dot_product / (norm1 * norm2)
+        
+        return similarity
     
-    def change_model(self, new_model: str):
-        """Смена модели эмбеддингов"""
-        available_models = self.list_available_models()
-        if new_model in available_models:
-            self.model = new_model
-            logging.info(f"Changed embedding model to: {new_model}")
-        else:
-            raise ValueError(f"Model {new_model} not available. Available: {available_models}")
+    def find_most_similar(self, query_embedding: List[float], 
+                         candidate_embeddings: List[List[float]], 
+                         top_k: int = 5) -> List[Dict[str, Any]]:
+        """Находит наиболее похожие эмбеддинги"""
+        similarities = []
+        
+        for i, candidate in enumerate(candidate_embeddings):
+            try:
+                similarity = self.calculate_similarity(query_embedding, candidate)
+                similarities.append({
+                    'index': i,
+                    'similarity': similarity,
+                    'embedding': candidate
+                })
+            except Exception as e:
+                logger.warning(f"Error calculating similarity for embedding {i}: {e}")
+                continue
+        
+        # Сортируем по убыванию сходства
+        similarities.sort(key=lambda x: x['similarity'], reverse=True)
+        
+        # Возвращаем top_k результатов
+        return similarities[:top_k]
     
-    def is_available(self) -> bool:
-        """Проверка доступности сервиса"""
+    def validate_embedding(self, embedding: List[float]) -> bool:
+        """Проверяет валидность эмбеддинга"""
+        if not isinstance(embedding, list):
+            return False
+        
+        if len(embedding) != self.embedding_dim:
+            return False
+        
+        # Проверяем, что все элементы - числа
         try:
-            response = self.session.get(f"{self.base_url}/api/tags", timeout=5)
-            return response.status_code == 200
+            return all(isinstance(x, (int, float)) for x in embedding)
         except Exception:
             return False
 
-class MockEmbeddingService:
-    """Мок-сервис эмбеддингов для тестирования"""
+class LocalEmbeddingService(EmbeddingService):
+    """Локальный сервис эмбеддингов (для случаев без Ollama)"""
     
-    def __init__(self, dimension: int = 1024):
-        self.dimension = dimension
-        import numpy as np
-        self.np = np
+    def __init__(self, model_path: Optional[Path] = None, embedding_dim: int = 1024):
+        super().__init__(embedding_dim=embedding_dim)
+        self.model_path = model_path
+        self._load_local_model()
     
-    def generate_embedding(self, text: str) -> EmbeddingResult:
-        """Генерация случайного эмбеддинга"""
-        embedding = self.np.random.normal(0, 1, self.dimension).tolist()
-        
-        return EmbeddingResult(
-            embedding=embedding,
-            model="mock",
-            usage={
-                'prompt_tokens': len(text.split()),
-                'total_tokens': len(text.split()),
-                'model': 'mock'
-            },
-            metadata={'mock': True}
-        )
+    def _load_local_model(self):
+        """Загружает локальную модель"""
+        # Здесь можно добавить загрузку локальных моделей
+        # например, через sentence-transformers или ONNX
+        logger.info("Local embedding service initialized")
     
-    def generate_embeddings_batch(self, texts: List[str], batch_size: int = 10) -> List[EmbeddingResult]:
-        """Генерация случайных эмбеддингов для списка текстов"""
-        return [self.generate_embedding(text) for text in texts]
+    def get_embedding(self, text: str) -> List[float]:
+        """Получает эмбеддинг используя локальную модель"""
+        # Заглушка - возвращает случайный вектор
+        # В реальной реализации здесь будет загрузка локальной модели
+        import random
+        random.seed(hash(text) % 2**32)
+        return [random.uniform(-1, 1) for _ in range(self.embedding_dim)]
     
-    def is_available(self) -> bool:
-        """Всегда доступен для тестирования"""
-        return True
-
-def create_embedding_service(service_type: str = "ollama", **kwargs) -> Any:
-    """Фабрика для создания сервиса эмбеддингов"""
-    if service_type == "ollama":
-        return OllamaEmbeddingService(**kwargs)
-    elif service_type == "mock":
-        return MockEmbeddingService(**kwargs)
-    else:
-        raise ValueError(f"Unknown embedding service type: {service_type}")
-
-# Утилиты для работы с эмбеддингами
-def normalize_embedding(embedding: List[float]) -> List[float]:
-    """Нормализация вектора эмбеддинга"""
-    import math
-    
-    magnitude = math.sqrt(sum(x * x for x in embedding))
-    if magnitude == 0:
-        return embedding
-    
-    return [x / magnitude for x in embedding]
-
-def cosine_similarity(vec1: List[float], vec2: List[float]) -> float:
-    """Вычисление косинусного сходства между векторами"""
-    if len(vec1) != len(vec2):
-        raise ValueError("Vectors must have same length")
-    
-    dot_product = sum(a * b for a, b in zip(vec1, vec2))
-    magnitude1 = sum(a * a for a in vec1) ** 0.5
-    magnitude2 = sum(b * b for b in vec2) ** 0.5
-    
-    if magnitude1 == 0 or magnitude2 == 0:
-        return 0.0
-    
-    return dot_product / (magnitude1 * magnitude2)
-
-def euclidean_distance(vec1: List[float], vec2: List[float]) -> float:
-    """Вычисление евклидова расстояния между векторами"""
-    if len(vec1) != len(vec2):
-        raise ValueError("Vectors must have same length")
-    
-    return sum((a - b) ** 2 for a, b in zip(vec1, vec2)) ** 0.5
+    def get_embeddings_batch(self, texts: List[str]) -> List[List[float]]:
+        """Получает эмбеддинги для батча текстов"""
+        return [self.get_embedding(text) for text in texts]

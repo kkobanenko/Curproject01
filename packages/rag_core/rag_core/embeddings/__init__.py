@@ -1,23 +1,10 @@
 """
-Сервис эмбеддингов для RAG-платформы
+Embedding services for RAG Core.
 """
 
-from .embedding_service import (
-    OllamaEmbeddingService,
-    MockEmbeddingService,
-    EmbeddingResult,
-    create_embedding_service,
-    normalize_embedding,
-    cosine_similarity,
-    euclidean_distance
-)
+from .embedding_service import EmbeddingService, LocalEmbeddingService
 
 __all__ = [
-    "OllamaEmbeddingService",
-    "MockEmbeddingService", 
-    "EmbeddingResult",
-    "create_embedding_service",
-    "normalize_embedding",
-    "cosine_similarity",
-    "euclidean_distance"
+    "EmbeddingService",
+    "LocalEmbeddingService",
 ]

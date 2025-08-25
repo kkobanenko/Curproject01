@@ -1,64 +1,37 @@
 """
-RAG Core - Основная логика для RAG-платформы
+RAG Core - Core RAG functionality for document processing, embeddings, and vector search.
 
-Этот пакет содержит:
-- Парсинг документов (PDF, DOCX, XLSX, HTML, EML)
-- OCR обработку с Tesseract и PaddleOCR
-- Извлечение таблиц с Camelot, Tabula, PaddleOCR
-- Векторное хранилище на PostgreSQL + pgvector
-- Сервис эмбеддингов через Ollama
+This package provides:
+- Document parsing for various formats (PDF, DOCX, XLSX, HTML, etc.)
+- Table extraction using advanced algorithms
+- OCR processing for scanned documents
+- Smart document chunking strategies
+- Embedding generation and vector search
+- PostgreSQL + pgvector integration
 """
+
+from .parsers.document_parser import DocumentParser, DocumentParserRegistry
+from .parsers.pdf_parser import PDFParser
+from .parsers.docx_parser import DOCXParser
+from .chunking.chunker import DocumentChunker, Chunk
+from .embeddings.embedding_service import EmbeddingService
+from .vectorstore.pgvector_store import PgVectorStore
+from .rag_pipeline import RAGPipeline
 
 __version__ = "0.1.0"
 __author__ = "RAG Platform Team"
 
-# Основные компоненты
-from .parsers.document_parser import DocumentParser, DocumentContent, DocumentChunk
-from .ocr.ocr_processor import OCRProcessor, OCRResult, ImagePage
-from .tables.table_extractor import TableExtractor, TableData, TableExtractionResult
-from .vectorstore.pgvector_store import PgVectorStore, SearchResult
-from .embeddings.embedding_service import (
-    OllamaEmbeddingService, 
-    MockEmbeddingService, 
-    EmbeddingResult,
-    create_embedding_service,
-    normalize_embedding,
-    cosine_similarity,
-    euclidean_distance
-)
-
-# Основные классы для импорта
 __all__ = [
-    # Парсеры
+    # Core classes
     "DocumentParser",
-    "DocumentContent", 
-    "DocumentChunk",
-    
-    # OCR
-    "OCRProcessor",
-    "OCRResult",
-    "ImagePage",
-    
-    # Таблицы
-    "TableExtractor",
-    "TableData",
-    "TableExtractionResult",
-    
-    # Векторное хранилище
+    "DocumentParserRegistry",
+    "DocumentChunker",
+    "Chunk",
+    "EmbeddingService",
     "PgVectorStore",
-    "SearchResult",
+    "RAGPipeline",
     
-    # Эмбеддинги
-    "OllamaEmbeddingService",
-    "MockEmbeddingService", 
-    "EmbeddingResult",
-    "create_embedding_service",
-    
-    # Утилиты
-    "normalize_embedding",
-    "cosine_similarity",
-    "euclidean_distance",
+    # Parser implementations
+    "PDFParser",
+    "DOCXParser",
 ]
-
-# Версия
-__version_info__ = tuple(int(x) for x in __version__.split('.'))

@@ -1,7 +1,7 @@
 """
-Парсеры документов для RAG-платформы
+Document parsers for RAG Core.
 """
 
-from .document_parser import DocumentParser, DocumentContent, DocumentChunk
+from .document_parser import DocumentParser, DocumentParserRegistry
 
-__all__ = ["DocumentParser", "DocumentContent", "DocumentChunk"]
+__all__ = ["DocumentParser", "DocumentParserRegistry"]
