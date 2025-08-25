@@ -1,221 +1,400 @@
 """
-DAG для обработки документов в RAG-платформе
-Пайплайн: обнаружение → парсинг → OCR → таблицы → чанки → эмбеддинги → upsert
+DAG для автоматической загрузки и обработки документов
 """
 
 from datetime import datetime, timedelta
 from airflow import DAG
 from airflow.operators.python import PythonOperator
 from airflow.operators.bash import BashOperator
+from airflow.operators.empty import EmptyOperator
 from airflow.models import Variable
 import os
 import logging
+from pathlib import Path
+import hashlib
+import json
 
-# Настройки по умолчанию
+# Настройка логирования
+logger = logging.getLogger(__name__)
+
+# Параметры DAG
 default_args = {
-    'owner': 'rag-team',
+    'owner': 'rag-platform',
     'depends_on_past': False,
     'start_date': datetime(2024, 1, 1),
     'email_on_failure': False,
     'email_on_retry': False,
-    'retries': 1,
+    'retries': 3,
     'retry_delay': timedelta(minutes=5),
+    'catchup': False
 }
 
-# Параметры DAG
-dag_id = 'ingest_documents_dag'
-schedule_interval = '0 */2 * * *'  # Каждые 2 часа
-catchup = False
-
-# Пути
-INBOX_PATH = '/opt/airflow/inbox'
-PROCESSED_PATH = '/opt/airflow/processed'
-ERROR_PATH = '/opt/airflow/error'
+# Создаем DAG
+dag = DAG(
+    'ingest_documents',
+    default_args=default_args,
+    description='Автоматическая загрузка и обработка документов',
+    schedule_interval='*/15 * * * *',  # Каждые 15 минут
+    max_active_runs=1,
+    tags=['rag', 'documents', 'ingest']
+)
 
 def discover_new_documents(**context):
-    """Обнаружение новых документов в inbox"""
-    import os
-    from pathlib import Path
-    
-    inbox = Path(INBOX_PATH)
-    if not inbox.exists():
-        logging.warning(f"Inbox path {INBOX_PATH} does not exist")
-        return []
-    
-    # Поддерживаемые форматы
-    supported_extensions = {'.pdf', '.docx', '.xlsx', '.html', '.eml', '.jpg', '.jpeg', '.png', '.tiff'}
-    
-    new_docs = []
-    for file_path in inbox.rglob('*'):
-        if file_path.is_file() and file_path.suffix.lower() in supported_extensions:
-            # Проверяем, не обработан ли уже файл
-            processed_file = Path(PROCESSED_PATH) / file_path.name
-            if not processed_file.exists():
-                new_docs.append(str(file_path))
-    
-    logging.info(f"Found {len(new_docs)} new documents to process")
-    context['task_instance'].xcom_push(key='new_documents', value=new_docs)
-    return new_docs
-
-def process_document(document_path: str, **context):
-    """Обработка одного документа"""
-    from rag_core.parsers.document_parser import DocumentParser
-    from rag_core.ocr.ocr_processor import OCRProcessor
-    from rag_core.tables.table_extractor import TableExtractor
-    from rag_core.vectorstore.pgvector_store import PgVectorStore
-    import os
-    
+    """Обнаруживает новые документы в inbox каталоге"""
     try:
-        logging.info(f"Processing document: {document_path}")
+        # Получаем путь к inbox каталогу
+        inbox_path = Variable.get("inbox_path", default_var="/opt/airflow/inbox")
+        inbox_dir = Path(inbox_path)
         
-        # Инициализация компонентов
-        parser = DocumentParser()
-        ocr_processor = OCRProcessor()
-        table_extractor = TableExtractor()
+        if not inbox_dir.exists():
+            logger.error(f"Inbox directory {inbox_path} does not exist")
+            return []
         
-        # Получаем DSN из переменных окружения
-        pg_dsn = os.getenv('PG_DSN')
-        if not pg_dsn:
-            raise ValueError("PG_DSN environment variable not set")
+        # Получаем список уже обработанных документов
+        processed_files = get_processed_files()
         
-        vector_store = PgVectorStore(pg_dsn)
+        # Ищем новые файлы
+        new_files = []
+        supported_extensions = {'.pdf', '.docx', '.xlsx', '.html', '.htm', '.eml'}
         
-        # Парсинг документа
-        doc_content = parser.parse(document_path)
+        for file_path in inbox_dir.rglob('*'):
+            if file_path.is_file() and file_path.suffix.lower() in supported_extensions:
+                file_hash = calculate_file_hash(file_path)
+                
+                if file_hash not in processed_files:
+                    new_files.append({
+                        'path': str(file_path),
+                        'hash': file_hash,
+                        'size': file_path.stat().st_size,
+                        'extension': file_path.suffix.lower(),
+                        'discovered_at': datetime.now().isoformat()
+                    })
+                    logger.info(f"Discovered new file: {file_path}")
         
-        # OCR для изображений/сканов
-        if doc_content.needs_ocr:
-            doc_content = ocr_processor.process(doc_content)
+        # Сохраняем информацию о новых файлах в XCom
+        context['task_instance'].xcom_push(key='new_documents', value=new_files)
         
-        # Извлечение таблиц
-        tables = table_extractor.extract_tables(doc_content)
+        logger.info(f"Discovered {len(new_files)} new documents")
+        return new_files
         
-        # Создание чанков
-        chunks = parser.create_chunks(doc_content, chunk_size=1000, overlap=200)
+    except Exception as e:
+        logger.error(f"Error discovering documents: {e}")
+        raise
+
+def get_processed_files():
+    """Получает список уже обработанных файлов"""
+    try:
+        # В реальной реализации здесь будет запрос к БД
+        # Пока используем простой файл
+        processed_file = "/opt/airflow/processed_files.json"
         
-        # Генерация эмбеддингов
-        embeddings = []
-        for chunk in chunks:
-            # Здесь будет вызов Ollama для эмбеддингов
-            # Пока заглушка
-            embedding = [0.0] * 1024  # BGE-M3 размер
-            embeddings.append(embedding)
+        if os.path.exists(processed_file):
+            with open(processed_file, 'r') as f:
+                data = json.load(f)
+                return set(data.get('processed_hashes', []))
+        return set()
         
-        # Upsert в векторное хранилище
-        doc_id = vector_store.ensure_document(
-            path=document_path,
-            sha256=doc_content.sha256,
-            title=doc_content.title or os.path.basename(document_path)
-        )
+    except Exception as e:
+        logger.warning(f"Error getting processed files: {e}")
+        return set()
+
+def calculate_file_hash(file_path):
+    """Вычисляет SHA256 хеш файла"""
+    sha256_hash = hashlib.sha256()
+    with open(file_path, "rb") as f:
+        for chunk in iter(lambda: f.read(4096), b""):
+            sha256_hash.update(chunk)
+    return sha256_hash.hexdigest()
+
+def validate_document(**context):
+    """Валидирует обнаруженные документы"""
+    try:
+        # Получаем список новых документов
+        new_documents = context['task_instance'].xcom_pull(key='new_documents', task_ids='discover_documents')
         
-        # Подготовка payload для chunks
-        chunk_payloads = []
-        for i, chunk in enumerate(chunks):
-            payload = {
-                'idx': i,
-                'kind': 'text',
-                'text': chunk.text,
-                'table_html': chunk.table_html if hasattr(chunk, 'table_html') else None,
-                'bbox': chunk.bbox if hasattr(chunk, 'bbox') else None,
-                'page_no': chunk.page_no if hasattr(chunk, 'page_no') else None
+        if not new_documents:
+            logger.info("No new documents to validate")
+            return []
+        
+        valid_documents = []
+        
+        for doc in new_documents:
+            file_path = Path(doc['path'])
+            
+            # Проверяем существование файла
+            if not file_path.exists():
+                logger.warning(f"File {file_path} no longer exists")
+                continue
+            
+            # Проверяем размер файла
+            if doc['size'] == 0:
+                logger.warning(f"File {file_path} is empty")
+                continue
+            
+            # Проверяем доступность для чтения
+            if not os.access(file_path, os.R_OK):
+                logger.warning(f"File {file_path} is not readable")
+                continue
+            
+            # Проверяем MIME тип
+            mime_type = get_mime_type(file_path)
+            if mime_type:
+                doc['mime_type'] = mime_type
+                valid_documents.append(doc)
+                logger.info(f"Document {file_path} validated successfully")
+            else:
+                logger.warning(f"Could not determine MIME type for {file_path}")
+        
+        # Сохраняем валидные документы
+        context['task_instance'].xcom_push(key='valid_documents', value=valid_documents)
+        
+        logger.info(f"Validated {len(valid_documents)} documents")
+        return valid_documents
+        
+    except Exception as e:
+        logger.error(f"Error validating documents: {e}")
+        raise
+
+def get_mime_type(file_path):
+    """Определяет MIME тип файла"""
+    try:
+        import magic
+        
+        mime = magic.Magic(mime=True)
+        return mime.from_file(str(file_path))
+        
+    except ImportError:
+        # Fallback к расширениям файлов
+        extension_mime_types = {
+            '.pdf': 'application/pdf',
+            '.docx': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+            '.xlsx': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+            '.html': 'text/html',
+            '.htm': 'text/html',
+            '.eml': 'message/rfc822'
+        }
+        
+        return extension_mime_types.get(file_path.suffix.lower(), 'application/octet-stream')
+
+def process_document_with_rag(**context):
+    """Обрабатывает документ с помощью RAG Core"""
+    try:
+        # Получаем валидные документы
+        valid_documents = context['task_instance'].xcom_pull(key='valid_documents', task_ids='validate_documents')
+        
+        if not valid_documents:
+            logger.info("No valid documents to process")
+            return []
+        
+        # Импортируем RAG Core
+        import sys
+        sys.path.append('/opt/airflow/rag_core')
+        
+        from rag_core import RAGPipeline
+        
+        # Получаем конфигурацию
+        pg_dsn = Variable.get("pg_dsn", default_var="postgresql://postgres:postgres@postgres:5432/rag_app")
+        
+        # Создаем RAG pipeline
+        rag_pipeline = RAGPipeline(pg_dsn)
+        
+        processed_documents = []
+        
+        for doc in valid_documents:
+            try:
+                logger.info(f"Processing document: {doc['path']}")
+                
+                # Обрабатываем документ
+                result = rag_pipeline.process_document(Path(doc['path']))
+                
+                # Добавляем результат обработки
+                doc['processing_result'] = result
+                doc['processed_at'] = datetime.now().isoformat()
+                doc['status'] = 'success'
+                
+                processed_documents.append(doc)
+                logger.info(f"Document {doc['path']} processed successfully")
+                
+            except Exception as e:
+                logger.error(f"Error processing document {doc['path']}: {e}")
+                doc['status'] = 'error'
+                doc['error_message'] = str(e)
+                doc['processed_at'] = datetime.now().isoformat()
+                processed_documents.append(doc)
+        
+        # Сохраняем результаты обработки
+        context['task_instance'].xcom_push(key='processed_documents', value=processed_documents)
+        
+        logger.info(f"Processed {len(processed_documents)} documents")
+        return processed_documents
+        
+    except Exception as e:
+        logger.error(f"Error in RAG processing: {e}")
+        raise
+
+def update_processing_status(**context):
+    """Обновляет статус обработки документов"""
+    try:
+        # Получаем обработанные документы
+        processed_documents = context['task_instance'].xcom_pull(key='processed_documents', task_ids='process_documents')
+        
+        if not processed_documents:
+            logger.info("No documents to update status")
+            return
+        
+        # В реальной реализации здесь будет обновление БД
+        # Пока просто логируем
+        
+        success_count = sum(1 for doc in processed_documents if doc['status'] == 'success')
+        error_count = sum(1 for doc in processed_documents if doc['status'] == 'error')
+        
+        logger.info(f"Processing completed: {success_count} success, {error_count} errors")
+        
+        # Обновляем список обработанных файлов
+        update_processed_files(processed_documents)
+        
+    except Exception as e:
+        logger.error(f"Error updating processing status: {e}")
+        raise
+
+def update_processed_files(processed_documents):
+    """Обновляет список обработанных файлов"""
+    try:
+        processed_file = "/opt/airflow/processed_files.json"
+        
+        # Загружаем существующий список
+        if os.path.exists(processed_file):
+            with open(processed_file, 'r') as f:
+                data = json.load(f)
+        else:
+            data = {'processed_hashes': [], 'documents': []}
+        
+        # Добавляем новые хеши
+        for doc in processed_documents:
+            if doc['hash'] not in data['processed_hashes']:
+                data['processed_hashes'].append(doc['hash'])
+            
+            # Добавляем информацию о документе
+            doc_info = {
+                'hash': doc['hash'],
+                'path': doc['path'],
+                'status': doc['status'],
+                'processed_at': doc['processed_at']
             }
-            chunk_payloads.append(payload)
+            
+            if 'error_message' in doc:
+                doc_info['error_message'] = doc['error_message']
+            
+            data['documents'].append(doc_info)
         
-        vector_store.upsert_chunks_and_embeddings(doc_id, chunk_payloads, embeddings)
+        # Сохраняем обновленный список
+        with open(processed_file, 'w') as f:
+            json.dump(data, f, indent=2)
         
-        # Перемещение в processed
-        os.makedirs(PROCESSED_PATH, exist_ok=True)
-        processed_path = os.path.join(PROCESSED_PATH, os.path.basename(document_path))
-        os.rename(document_path, processed_path)
-        
-        logging.info(f"Successfully processed: {document_path}")
-        return True
+        logger.info(f"Updated processed files list with {len(processed_documents)} documents")
         
     except Exception as e:
-        logging.error(f"Error processing {document_path}: {str(e)}")
-        
-        # Перемещение в error
-        os.makedirs(ERROR_PATH, exist_ok=True)
-        error_path = os.path.join(ERROR_PATH, os.path.basename(document_path))
-        os.rename(document_path, error_path)
-        
-        raise e
+        logger.error(f"Error updating processed files: {e}")
 
-def process_all_documents(**context):
-    """Обработка всех обнаруженных документов"""
-    new_docs = context['task_instance'].xcom_pull(key='new_documents', task_ids='discover_documents')
-    
-    if not new_docs:
-        logging.info("No new documents to process")
-        return
-    
-    results = []
-    for doc_path in new_docs:
-        try:
-            result = process_document(doc_path, **context)
-            results.append(result)
-        except Exception as e:
-            logging.error(f"Failed to process {doc_path}: {e}")
-            results.append(False)
-    
-    success_count = sum(1 for r in results if r)
-    logging.info(f"Processed {success_count}/{len(results)} documents successfully")
-    
-    return results
-
-def update_metrics(**context):
-    """Обновление метрик в ClickHouse"""
-    import os
-    from clickhouse_connect import get_client
-    
+def cleanup_temp_files(**context):
+    """Очищает временные файлы"""
     try:
-        clickhouse_url = os.getenv('CLICKHOUSE_URL', 'http://clickhouse:8123')
-        client = get_client(host=clickhouse_url.replace('http://', '').split(':')[0])
+        # Получаем обработанные документы
+        processed_documents = context['task_instance'].xcom_pull(key='processed_documents', task_ids='process_documents')
         
-        # Здесь будет логика обновления метрик
-        # Пока заглушка
-        logging.info("Metrics updated in ClickHouse")
+        if not processed_documents:
+            logger.info("No documents to cleanup")
+            return
+        
+        # В реальной реализации здесь может быть очистка временных файлов
+        # Пока просто логируем
+        
+        logger.info("Cleanup completed")
         
     except Exception as e:
-        logging.error(f"Failed to update metrics: {e}")
-        raise e
+        logger.error(f"Error in cleanup: {e}")
+        raise
 
-# Создание DAG
-with DAG(
-    dag_id=dag_id,
-    default_args=default_args,
-    description='Document ingestion pipeline for RAG platform',
-    schedule_interval=schedule_interval,
-    catchup=catchup,
-    tags=['rag', 'documents', 'ingestion'],
-) as dag:
-    
-    # Task 1: Обнаружение новых документов
-    discover_task = PythonOperator(
-        task_id='discover_documents',
-        python_callable=discover_new_documents,
-        provide_context=True,
-    )
-    
-    # Task 2: Обработка всех документов
-    process_task = PythonOperator(
-        task_id='process_documents',
-        python_callable=process_all_documents,
-        provide_context=True,
-    )
-    
-    # Task 3: Обновление метрик
-    metrics_task = PythonOperator(
-        task_id='update_metrics',
-        python_callable=update_metrics,
-        provide_context=True,
-    )
-    
-    # Task 4: Очистка временных файлов
-    cleanup_task = BashOperator(
-        task_id='cleanup_temp_files',
-        bash_command='find /tmp -name "rag_*" -mtime +1 -delete || true',
-    )
-    
-    # Определение порядка выполнения
-    discover_task >> process_task >> metrics_task >> cleanup_task
+def generate_processing_report(**context):
+    """Генерирует отчет об обработке"""
+    try:
+        # Получаем все данные
+        new_documents = context['task_instance'].xcom_pull(key='new_documents', task_ids='discover_documents')
+        valid_documents = context['task_instance'].xcom_pull(key='valid_documents', task_ids='validate_documents')
+        processed_documents = context['task_instance'].xcom_pull(key='processed_documents', task_ids='process_documents')
+        
+        # Формируем отчет
+        report = {
+            'timestamp': datetime.now().isoformat(),
+            'discovery': {
+                'total_found': len(new_documents) if new_documents else 0
+            },
+            'validation': {
+                'total_valid': len(valid_documents) if valid_documents else 0,
+                'total_invalid': (len(new_documents) if new_documents else 0) - (len(valid_documents) if valid_documents else 0)
+            },
+            'processing': {
+                'total_processed': len(processed_documents) if processed_documents else 0,
+                'success_count': sum(1 for doc in processed_documents if doc and doc.get('status') == 'success') if processed_documents else 0,
+                'error_count': sum(1 for doc in processed_documents if doc and doc.get('status') == 'error') if processed_documents else 0
+            }
+        }
+        
+        # Сохраняем отчет
+        context['task_instance'].xcom_push(key='processing_report', value=report)
+        
+        # Логируем отчет
+        logger.info("Processing Report:")
+        logger.info(f"  Discovery: {report['discovery']['total_found']} documents found")
+        logger.info(f"  Validation: {report['validation']['total_valid']} valid, {report['validation']['total_invalid']} invalid")
+        logger.info(f"  Processing: {report['processing']['success_count']} success, {report['processing']['error_count']} errors")
+        
+        return report
+        
+    except Exception as e:
+        logger.error(f"Error generating report: {e}")
+        raise
+
+# Определяем задачи
+start_task = EmptyOperator(task_id='start', dag=dag)
+
+discover_task = PythonOperator(
+    task_id='discover_documents',
+    python_callable=discover_new_documents,
+    dag=dag
+)
+
+validate_task = PythonOperator(
+    task_id='validate_documents',
+    python_callable=validate_document,
+    dag=dag
+)
+
+process_task = PythonOperator(
+    task_id='process_documents',
+    python_callable=process_document_with_rag,
+    dag=dag
+)
+
+update_status_task = PythonOperator(
+    task_id='update_processing_status',
+    python_callable=update_processing_status,
+    dag=dag
+)
+
+cleanup_task = PythonOperator(
+    task_id='cleanup_temp_files',
+    python_callable=cleanup_temp_files,
+    dag=dag
+)
+
+report_task = PythonOperator(
+    task_id='generate_report',
+    python_callable=generate_processing_report,
+    dag=dag
+)
+
+end_task = EmptyOperator(task_id='end', dag=dag)
+
+# Определяем зависимости
+start_task >> discover_task >> validate_task >> process_task >> update_status_task >> cleanup_task >> report_task >> end_task
