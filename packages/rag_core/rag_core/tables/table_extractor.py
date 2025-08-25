@@ -3,498 +3,502 @@
 Поддерживает Camelot (векторные PDF), Tabula (потоковые PDF), PaddleOCR (сканы)
 """
 
-import os
+from __future__ import annotations
 import logging
 from pathlib import Path
-from typing import List, Dict, Any, Optional, Union
-from dataclasses import dataclass
-import pandas as pd
+from typing import Dict, Any, List, Optional, Tuple
+import json
 
-# Импорты для различных методов извлечения таблиц
+logger = logging.getLogger(__name__)
+
 try:
     import camelot
     CAMELOT_AVAILABLE = True
 except ImportError:
     CAMELOT_AVAILABLE = False
-    logging.warning("camelot-py not available, PDF table extraction disabled")
+    logger.warning("camelot-py not available, table extraction disabled")
 
 try:
     import tabula
     TABULA_AVAILABLE = True
 except ImportError:
     TABULA_AVAILABLE = False
-    logging.warning("tabula-py not available, PDF table extraction disabled")
+    logger.warning("tabula-py not available, table extraction disabled")
 
 try:
     from paddleocr import PaddleOCR
     PADDLE_AVAILABLE = True
 except ImportError:
     PADDLE_AVAILABLE = False
-    logging.warning("PaddleOCR not available, image table extraction disabled")
-
-@dataclass
-class TableData:
-    """Данные таблицы"""
-    data: List[List[str]]
-    rows: int
-    cols: int
-    page: Optional[int] = None
-    bbox: Optional[Dict[str, Any]] = None
-    confidence: float = 0.0
-    extraction_method: str = "unknown"
-    metadata: Optional[Dict[str, Any]] = None
-
-@dataclass
-class TableExtractionResult:
-    """Результат извлечения таблиц"""
-    tables: List[TableData]
-    total_tables: int
-    extraction_methods_used: List[str]
-    success_rate: float
+    logger.warning("PaddleOCR not available, table structure detection disabled")
 
 class TableExtractor:
-    """Основной экстрактор таблиц"""
+    """Улучшенный экстрактор таблиц с поддержкой различных методов"""
     
-    def __init__(self):
-        self.camelot_available = CAMELOT_AVAILABLE
-        self.tabula_available = TABULA_AVAILABLE
-        self.paddle_available = PADDLE_AVAILABLE
+    def __init__(self, 
+                 use_camelot: bool = True,
+                 use_tabula: bool = True,
+                 use_paddle: bool = True):
+        self.use_camelot = use_camelot and CAMELOT_AVAILABLE
+        self.use_tabula = use_tabula and TABULA_AVAILABLE
+        self.use_paddle = use_paddle and PADDLE_AVAILABLE
         
-        if self.paddle_available:
+        self._initialize_engines()
+        self._check_capabilities()
+    
+    def _initialize_engines(self):
+        """Инициализирует доступные движки"""
+        if self.use_paddle:
             try:
-                self.paddle_ocr = PaddleOCR(use_angle_cls=True, lang='ch', show_log=False)
-                logging.info("PaddleOCR initialized for table extraction")
+                self.paddle_ocr = PaddleOCR(
+                    use_angle_cls=True, 
+                    lang='en', 
+                    show_log=False,
+                    use_gpu=False  # CPU-only для совместимости
+                )
+                logger.info("PaddleOCR initialized successfully")
             except Exception as e:
-                logging.warning(f"PaddleOCR not available: {e}")
-                self.paddle_available = False
-    
-    def extract_tables(self, content: Any) -> TableExtractionResult:
-        """Извлечение таблиц из контента документа"""
-        # Здесь будет логика обработки DocumentContent
-        # Пока заглушка
-        return TableExtractionResult(
-            tables=[],
-            total_tables=0,
-            extraction_methods_used=[],
-            success_rate=0.0
-        )
-    
-    def extract_from_pdf(self, pdf_path: str, method: str = "auto") -> TableExtractionResult:
-        """Извлечение таблиц из PDF"""
-        if not os.path.exists(pdf_path):
-            raise FileNotFoundError(f"PDF file not found: {pdf_path}")
+                logger.warning(f"Failed to initialize PaddleOCR: {e}")
+                self.use_paddle = False
         
-        if method == "auto":
-            # Автоматически выбираем лучший метод
-            return self._extract_from_pdf_auto(pdf_path)
-        elif method == "camelot" and self.camelot_available:
-            return self._extract_with_camelot(pdf_path)
-        elif method == "tabula" and self.tabula_available:
-            return self._extract_with_tabula(pdf_path)
-        elif method == "paddle" and self.paddle_available:
-            return self._extract_with_paddle(pdf_path)
-        else:
-            raise ValueError(f"Unsupported extraction method: {method}")
-    
-    def extract_from_image(self, image_path: str) -> TableExtractionResult:
-        """Извлечение таблиц из изображения"""
-        if not self.paddle_available:
-            raise ImportError("PaddleOCR not available for image table extraction")
+        if self.use_camelot:
+            logger.info("Camelot-py available for table extraction")
         
-        if not os.path.exists(image_path):
-            raise FileNotFoundError(f"Image file not found: {image_path}")
+        if self.use_tabula:
+            logger.info("Tabula-py available for table extraction")
+    
+    def _check_capabilities(self):
+        """Проверяет доступные возможности"""
+        capabilities = []
+        if self.use_camelot:
+            capabilities.append("Camelot (vector PDFs)")
+        if self.use_tabula:
+            capabilities.append("Tabula (Java-based)")
+        if self.use_paddle:
+            capabilities.append("PaddleOCR (structure detection)")
+        
+        logger.info(f"Table extraction capabilities: {', '.join(capabilities)}")
+    
+    def extract_tables_from_pdf(self, pdf_path: Path) -> List[Dict[str, Any]]:
+        """Извлекает таблицы из PDF используя все доступные методы"""
+        tables = []
+        
+        # Метод 1: Camelot (для векторных PDF)
+        if self.use_camelot:
+            camelot_tables = self._extract_with_camelot(pdf_path)
+            tables.extend(camelot_tables)
+        
+        # Метод 2: Tabula (для сложных таблиц)
+        if self.use_tabula:
+            tabula_tables = self._extract_with_tabula(pdf_path)
+            tables.extend(tabula_tables)
+        
+        # Метод 3: PaddleOCR (для сканов)
+        if self.use_paddle:
+            paddle_tables = self._extract_with_paddle(pdf_path)
+            tables.extend(paddle_tables)
+        
+        # Убираем дубликаты и сортируем по качеству
+        unique_tables = self._deduplicate_tables(tables)
+        sorted_tables = self._sort_tables_by_quality(unique_tables)
+        
+        logger.info(f"Extracted {len(sorted_tables)} unique tables from {pdf_path}")
+        return sorted_tables
+    
+    def _extract_with_camelot(self, pdf_path: Path) -> List[Dict[str, Any]]:
+        """Извлекает таблицы используя Camelot"""
+        tables = []
         
         try:
-            tables = []
-            extraction_methods = ["paddle"]
-            
-            # Извлекаем таблицы с помощью PaddleOCR
-            table_data = self._extract_table_structure_paddle(image_path)
-            
-            if table_data and table_data.get('structure', {}).get('type') == 'table':
-                structure = table_data['structure']
-                
-                # Преобразуем в формат TableData
-                table = TableData(
-                    data=structure.get('cells', []),
-                    rows=structure.get('rows', 0),
-                    cols=structure.get('max_cols', 0),
-                    confidence=0.8,  # Примерная оценка
-                    extraction_method="paddle",
-                    metadata={
-                        'orientation': table_data.get('orientation', 0),
-                        'bbox': table_data.get('bbox')
-                    }
-                )
-                tables.append(table)
-            
-            success_rate = len(tables) / 1.0 if tables else 0.0
-            
-            return TableExtractionResult(
-                tables=tables,
-                total_tables=len(tables),
-                extraction_methods_used=extraction_methods,
-                success_rate=success_rate
+            # Lattice mode (для таблиц с линиями)
+            lattice_tables = camelot.read_pdf(
+                str(pdf_path), 
+                pages='all', 
+                flavor='lattice',
+                suppress_stdout=True,
+                quiet=True
             )
             
-        except Exception as e:
-            logging.error(f"Error extracting tables from image {image_path}: {e}")
-            raise
-    
-    def _extract_from_pdf_auto(self, pdf_path: str) -> TableExtractionResult:
-        """Автоматический выбор метода извлечения для PDF"""
-        all_tables = []
-        methods_used = []
-        
-        # Пробуем Camelot (лучше для векторных PDF)
-        if self.camelot_available:
-            try:
-                camelot_result = self._extract_with_camelot(pdf_path)
-                if camelot_result.tables:
-                    all_tables.extend(camelot_result.tables)
-                    methods_used.append("camelot")
-                    logging.info(f"Extracted {len(camelot_result.tables)} tables with Camelot")
-            except Exception as e:
-                logging.warning(f"Camelot extraction failed: {e}")
-        
-        # Пробуем Tabula (лучше для потоковых PDF)
-        if self.tabula_available:
-            try:
-                tabula_result = self._extract_with_tabula(pdf_path)
-                if tabula_result.tables:
-                    all_tables.extend(tabula_result.tables)
-                    methods_used.append("tabula")
-                    logging.info(f"Extracted {len(tabula_result.tables)} tables with Tabula")
-            except Exception as e:
-                logging.warning(f"Tabula extraction failed: {e}")
-        
-        # Если ничего не получилось, пробуем PaddleOCR
-        if not all_tables and self.paddle_available:
-            try:
-                paddle_result = self._extract_with_paddle(pdf_path)
-                if paddle_result.tables:
-                    all_tables.extend(paddle_result.tables)
-                    methods_used.append("paddle")
-                    logging.info(f"Extracted {len(paddle_result.tables)} tables with PaddleOCR")
-            except Exception as e:
-                logging.warning(f"PaddleOCR extraction failed: {e}")
-        
-        success_rate = len(all_tables) / max(len(methods_used), 1)
-        
-        return TableExtractionResult(
-            tables=all_tables,
-            total_tables=len(all_tables),
-            extraction_methods_used=methods_used,
-            success_rate=success_rate
-        )
-    
-    def _extract_with_camelot(self, pdf_path: str) -> TableExtractionResult:
-        """Извлечение таблиц с помощью Camelot"""
-        if not self.camelot_available:
-            raise ImportError("Camelot not available")
-        
-        try:
-            # Пробуем разные методы Camelot
-            tables = []
-            methods_used = ["camelot"]
-            
-            # Lattice mode (для таблиц с линиями)
-            try:
-                lattice_tables = camelot.read_pdf(
-                    pdf_path, 
-                    pages='all', 
-                    flavor='lattice',
-                    suppress_stdout=True
-                )
-                
-                for table in lattice_tables:
-                    if table.parsing_report['accuracy'] > 80:  # Фильтруем по точности
-                        table_data = TableData(
-                            data=table.df.values.tolist(),
-                            rows=len(table.df),
-                            cols=len(table.df.columns),
-                            page=table.page,
-                            bbox=table._bbox,
-                            confidence=table.parsing_report['accuracy'] / 100.0,
-                            extraction_method="camelot_lattice",
-                            metadata={
-                                'whitespace': table.parsing_report['whitespace'],
-                                'order': table.parsing_report['order']
-                            }
-                        )
-                        tables.append(table_data)
-                
-                logging.info(f"Extracted {len(tables)} tables with Camelot lattice mode")
-                
-            except Exception as e:
-                logging.warning(f"Camelot lattice mode failed: {e}")
+            for i, table in enumerate(lattice_tables):
+                if table.accuracy > 50:  # Фильтруем по точности
+                    table_info = self._process_camelot_table(table, i, 'lattice')
+                    tables.append(table_info)
             
             # Stream mode (для таблиц без линий)
-            try:
-                stream_tables = camelot.read_pdf(
-                    pdf_path, 
-                    pages='all', 
-                    flavor='stream',
-                    suppress_stdout=True
-                )
-                
-                for table in stream_tables:
-                    if table.parsing_report['accuracy'] > 80:
-                        table_data = TableData(
-                            data=table.df.values.tolist(),
-                            rows=len(table.df),
-                            cols=len(table.df.columns),
-                            page=table.page,
-                            bbox=table._bbox,
-                            confidence=table.parsing_report['accuracy'] / 100.0,
-                            extraction_method="camelot_stream",
-                            metadata={
-                                'whitespace': table.parsing_report['whitespace'],
-                                'order': table.parsing_report['order']
-                            }
-                        )
-                        tables.append(table_data)
-                
-                logging.info(f"Extracted {len(stream_tables)} tables with Camelot stream mode")
-                
-            except Exception as e:
-                logging.warning(f"Camelot stream mode failed: {e}")
-            
-            success_rate = len(tables) / max(len(methods_used), 1)
-            
-            return TableExtractionResult(
-                tables=tables,
-                total_tables=len(tables),
-                extraction_methods_used=methods_used,
-                success_rate=success_rate
+            stream_tables = camelot.read_pdf(
+                str(pdf_path), 
+                pages='all', 
+                flavor='stream',
+                suppress_stdout=True,
+                quiet=True
             )
             
-        except Exception as e:
-            logging.error(f"Error with Camelot extraction: {e}")
-            raise
-    
-    def _extract_with_tabula(self, pdf_path: str) -> TableExtractionResult:
-        """Извлечение таблиц с помощью Tabula"""
-        if not self.tabula_available:
-            raise ImportError("Tabula not available")
-        
-        try:
-            tables = []
-            methods_used = ["tabula"]
-            
-            # Получаем все таблицы из PDF
-            all_tables = tabula.read_pdf(
-                pdf_path,
-                pages='all',
-                multiple_tables=True,
-                guess=False,
-                stream=True
-            )
-            
-            for i, table in enumerate(all_tables):
-                if not table.empty:
-                    # Преобразуем DataFrame в список
-                    table_data = TableData(
-                        data=table.values.tolist(),
-                        rows=len(table),
-                        cols=len(table.columns),
-                        page=i + 1,  # Tabula не дает номер страницы
-                        confidence=0.7,  # Примерная оценка для Tabula
-                        extraction_method="tabula",
-                        metadata={
-                            'columns': table.columns.tolist(),
-                            'index': table.index.tolist()
-                        }
-                    )
-                    tables.append(table_data)
-            
-            success_rate = len(tables) / max(len(methods_used), 1)
-            
-            return TableExtractionResult(
-                tables=tables,
-                total_tables=len(tables),
-                extraction_methods_used=methods_used,
-                success_rate=success_rate
-            )
-            
-        except Exception as e:
-            logging.error(f"Error with Tabula extraction: {e}")
-            raise
-    
-    def _extract_with_paddle(self, pdf_path: str) -> TableExtractionResult:
-        """Извлечение таблиц с помощью PaddleOCR"""
-        if not self.paddle_available:
-            raise ImportError("PaddleOCR not available")
-        
-        try:
-            tables = []
-            methods_used = ["paddle"]
-            
-            # Конвертируем PDF в изображения
-            from pdf2image import convert_from_path
-            
-            pages = convert_from_path(pdf_path, dpi=300)
-            
-            for i, page in enumerate(pages):
-                # Сохраняем страницу как изображение
-                temp_image_path = f"/tmp/rag_page_{i+1}.png"
-                page.save(temp_image_path, 'PNG')
-                
-                try:
-                    # Извлекаем таблицы с этой страницы
-                    table_data = self._extract_table_structure_paddle(temp_image_path)
+            for i, table in enumerate(stream_tables):
+                if table.accuracy > 50 and table.whitespace < 50:
+                    table_info = self._process_camelot_table(table, len(tables), 'stream')
+                    tables.append(table_info)
                     
-                    if table_data and table_data.get('structure', {}).get('type') == 'table':
-                        structure = table_data['structure']
-                        
-                        table = TableData(
-                            data=structure.get('cells', []),
-                            rows=structure.get('rows', 0),
-                            cols=structure.get('max_cols', 0),
-                            page=i + 1,
-                            confidence=0.8,
-                            extraction_method="paddle",
-                            metadata={
-                                'orientation': table_data.get('orientation', 0)
-                            }
-                        )
-                        tables.append(table)
-                
-                finally:
-                    # Удаляем временный файл
-                    if os.path.exists(temp_image_path):
-                        os.remove(temp_image_path)
-            
-            success_rate = len(tables) / max(len(methods_used), 1)
-            
-            return TableExtractionResult(
-                tables=tables,
-                total_tables=len(tables),
-                extraction_methods_used=methods_used,
-                success_rate=success_rate
+        except Exception as e:
+            logger.warning(f"Error extracting tables with Camelot from {pdf_path}: {e}")
+        
+        return tables
+    
+    def _process_camelot_table(self, table, index: int, method: str) -> Dict[str, Any]:
+        """Обрабатывает таблицу Camelot"""
+        return {
+            'table_index': index,
+            'page': table.page,
+            'accuracy': table.accuracy,
+            'whitespace': table.whitespace,
+            'data': table.df.values.tolist(),
+            'df': table.df,
+            'extraction_method': f'camelot_{method}',
+            'bbox': table._bbox,
+            'order': table.order,
+            'width': table.width,
+            'height': table.height
+        }
+    
+    def _extract_with_tabula(self, pdf_path: Path) -> List[Dict[str, Any]]:
+        """Извлекает таблицы используя Tabula"""
+        tables = []
+        
+        try:
+            # Получаем информацию о страницах
+            page_info = tabula.read_pdf(
+                str(pdf_path), 
+                pages='all', 
+                guess=False,
+                stream=True,
+                pandas_options={'header': None}
             )
+            
+            for page_num, page_tables in enumerate(page_info):
+                if page_tables is not None and not page_tables.empty:
+                    # Разбиваем на отдельные таблицы если нужно
+                    table_blocks = self._split_tabula_tables(page_tables)
+                    
+                    for i, table_block in enumerate(table_blocks):
+                        table_info = self._process_tabula_table(
+                            table_block, 
+                            len(tables), 
+                            page_num + 1
+                        )
+                        tables.append(table_info)
+                        
+        except Exception as e:
+            logger.warning(f"Error extracting tables with Tabula from {pdf_path}: {e}")
+        
+        return tables
+    
+    def _split_tabula_tables(self, df) -> List:
+        """Разбивает результат Tabula на отдельные таблицы"""
+        # Простая логика разбиения по пустым строкам
+        tables = []
+        current_table = []
+        
+        for idx, row in df.iterrows():
+            # Проверяем, является ли строка пустой
+            if row.isna().all() or (row == '').all():
+                if current_table:
+                    tables.append(current_table)
+                    current_table = []
+            else:
+                current_table.append(row)
+        
+        # Добавляем последнюю таблицу
+        if current_table:
+            tables.append(current_table)
+        
+        return tables
+    
+    def _process_tabula_table(self, table_data, index: int, page: int) -> Dict[str, Any]:
+        """Обрабатывает таблицу Tabula"""
+        # Конвертируем в список списков
+        data = [row.tolist() for row in table_data]
+        
+        # Очищаем данные
+        cleaned_data = []
+        for row in data:
+            cleaned_row = [str(cell).strip() if cell is not None else '' for cell in row]
+            if any(cell for cell in cleaned_row):  # Пропускаем пустые строки
+                cleaned_data.append(cleaned_row)
+        
+        return {
+            'table_index': index,
+            'page': page,
+            'data': cleaned_data,
+            'rows': len(cleaned_data),
+            'cols': len(cleaned_data[0]) if cleaned_data else 0,
+            'extraction_method': 'tabula',
+            'accuracy': 80,  # Примерная оценка
+            'whitespace': 20
+        }
+    
+    def _extract_with_paddle(self, pdf_path: Path) -> List[Dict[str, Any]]:
+        """Извлекает таблицы используя PaddleOCR"""
+        tables = []
+        
+        try:
+            # Конвертируем PDF в изображения
+            images = self._pdf_to_images(pdf_path)
+            
+            for page_num, image in enumerate(images):
+                # Определяем структуру таблицы
+                table_structure = self._detect_table_structure(image)
+                
+                if table_structure:
+                    # Извлекаем текст из ячеек
+                    table_data = self._extract_table_data_from_image(image, table_structure)
+                    
+                    table_info = {
+                        'table_index': len(tables),
+                        'page': page_num + 1,
+                        'data': table_data,
+                        'rows': len(table_data),
+                        'cols': len(table_data[0]) if table_data else 0,
+                        'extraction_method': 'paddleocr',
+                        'accuracy': 70,  # Примерная оценка для OCR
+                        'whitespace': 30,
+                        'structure': table_structure
+                    }
+                    tables.append(table_info)
+                    
+        except Exception as e:
+            logger.warning(f"Error extracting tables with PaddleOCR from {pdf_path}: {e}")
+        
+        return tables
+    
+    def _pdf_to_images(self, pdf_path: Path) -> List:
+        """Конвертирует PDF в изображения"""
+        try:
+            import fitz  # PyMuPDF
+            
+            doc = fitz.open(str(pdf_path))
+            images = []
+            
+            for page_num in range(len(doc)):
+                page = doc[page_num]
+                mat = fitz.Matrix(2.0, 2.0)  # Увеличиваем разрешение
+                pix = page.get_pixmap(matrix=mat)
+                
+                # Конвертируем в PIL Image
+                img_data = pix.tobytes("png")
+                from PIL import Image
+                import io
+                image = Image.open(io.BytesIO(img_data))
+                images.append(image)
+            
+            doc.close()
+            return images
             
         except ImportError:
-            logging.error("pdf2image not available for PDF to image conversion")
-            raise
-        except Exception as e:
-            logging.error(f"Error with PaddleOCR extraction: {e}")
-            raise
+            logger.warning("PyMuPDF not available for PDF to image conversion")
+            return []
     
-    def _extract_table_structure_paddle(self, image_path: str) -> Dict[str, Any]:
-        """Извлечение структуры таблицы с помощью PaddleOCR"""
-        if not self.paddle_available:
-            return {}
+    def _detect_table_structure(self, image) -> Optional[Dict[str, Any]]:
+        """Определяет структуру таблицы на изображении"""
+        if not self.use_paddle:
+            return None
         
         try:
+            # Конвертируем PIL в numpy для OpenCV
+            import numpy as np
             import cv2
             
-            # Загружаем изображение
-            image = cv2.imread(image_path)
-            if image is None:
-                return {}
+            if hasattr(image, 'convert'):
+                image = image.convert('RGB')
+                image_array = np.array(image)
+                image_cv = cv2.cvtColor(image_array, cv2.COLOR_RGB2BGR)
+            else:
+                image_cv = image
             
-            # PaddleOCR для структуры таблицы
-            result = self.paddle_ocr.ocr(image, cls=True)
+            # PaddleOCR для определения структуры
+            result = self.paddle_ocr.ocr(image_cv, cls=True)
+            
+            if not result or not result[0]:
+                return None
             
             # Анализируем результат для определения структуры таблицы
-            table_structure = self._analyze_table_structure(result)
-            
-            return {
-                'orientation': 0,  # PaddleOCR автоматически определяет
-                'structure': table_structure,
-                'raw_result': result
-            }
+            structure = self._analyze_paddle_result(result[0])
+            return structure
             
         except Exception as e:
-            logging.error(f"Error extracting table structure with PaddleOCR: {e}")
-            return {}
+            logger.warning(f"Error detecting table structure: {e}")
+            return None
     
-    def _analyze_table_structure(self, paddle_result: List) -> Dict[str, Any]:
-        """Анализ структуры таблицы из результата PaddleOCR"""
-        if not paddle_result:
-            return {'type': 'unknown', 'cells': []}
+    def _analyze_paddle_result(self, ocr_result: List) -> Dict[str, Any]:
+        """Анализирует результат PaddleOCR для определения структуры таблицы"""
+        if not ocr_result:
+            return {}
         
-        try:
-            # Извлекаем все текстовые блоки
-            text_blocks = []
-            for line in paddle_result:
-                if line:
-                    for word_info in line:
-                        if word_info:
-                            bbox, (text, confidence) = word_info
-                            text_blocks.append({
-                                'text': text,
-                                'confidence': confidence,
-                                'bbox': bbox
-                            })
+        # Извлекаем все текстовые блоки
+        text_blocks = []
+        for line in ocr_result:
+            if line:
+                bbox, (text, confidence) = line
+                text_blocks.append({
+                    'text': text,
+                    'confidence': confidence,
+                    'bbox': bbox
+                })
+        
+        if not text_blocks:
+            return {}
+        
+        # Анализируем расположение для определения структуры таблицы
+        # Сортируем по Y координате (строки)
+        text_blocks.sort(key=lambda x: x['bbox'][0][1])
+        
+        # Группируем по строкам
+        rows = []
+        current_row = []
+        current_y = None
+        y_tolerance = 20  # Допуск для строк
+        
+        for block in text_blocks:
+            y = block['bbox'][0][1]
             
-            # Анализируем расположение для определения структуры таблицы
-            if text_blocks:
-                # Сортируем по Y координате (строки)
-                text_blocks.sort(key=lambda x: x['bbox'][0][1])
-                
-                # Группируем по строкам
-                rows = []
-                current_row = []
-                current_y = None
-                y_tolerance = 20  # Допуск для строк
-                
-                for block in text_blocks:
-                    y = block['bbox'][0][1]
-                    
-                    if current_y is None or abs(y - current_y) <= y_tolerance:
-                        current_row.append(block)
-                        current_y = y
-                    else:
-                        if current_row:
-                            # Сортируем по X координате внутри строки
-                            current_row.sort(key=lambda x: x['bbox'][0][0])
-                            rows.append(current_row)
-                        current_row = [block]
-                        current_y = y
-                
-                # Добавляем последнюю строку
+            if current_y is None or abs(y - current_y) <= y_tolerance:
+                current_row.append(block)
+                current_y = y
+            else:
                 if current_row:
+                    # Сортируем по X координате внутри строки
                     current_row.sort(key=lambda x: x['bbox'][0][0])
                     rows.append(current_row)
-                
-                return {
-                    'type': 'table',
-                    'rows': len(rows),
-                    'max_cols': max(len(row) for row in rows) if rows else 0,
-                    'cells': [
-                        {
-                            'row': i,
-                            'col': j,
-                            'text': cell['text'],
-                            'confidence': cell['confidence'],
-                            'bbox': cell['bbox']
-                        }
-                        for i, row in enumerate(rows)
-                        for j, cell in enumerate(row)
-                    ]
+                current_row = [block]
+                current_y = y
+        
+        # Добавляем последнюю строку
+        if current_row:
+            current_row.sort(key=lambda x: x['bbox'][0][0])
+            rows.append(current_row)
+        
+        return {
+            'type': 'table',
+            'rows': len(rows),
+            'max_cols': max(len(row) for row in rows) if rows else 0,
+            'cells': [
+                {
+                    'row': i,
+                    'col': j,
+                    'text': cell['text'],
+                    'confidence': cell['confidence'],
+                    'bbox': cell['bbox']
                 }
-            
-            return {'type': 'unknown', 'cells': []}
-            
-        except Exception as e:
-            logging.error(f"Error analyzing table structure: {e}")
-            return {'type': 'error', 'cells': []}
+                for i, row in enumerate(rows)
+                for j, cell in enumerate(row)
+            ]
+        }
     
-    def get_supported_methods(self) -> List[str]:
-        """Получение списка поддерживаемых методов извлечения"""
-        methods = []
+    def _extract_table_data_from_image(self, image, structure: Dict[str, Any]) -> List[List[str]]:
+        """Извлекает данные таблицы из изображения на основе структуры"""
+        if 'cells' not in structure:
+            return []
         
-        if self.camelot_available:
-            methods.append("camelot")
-        if self.tabula_available:
-            methods.append("tabula")
-        if self.paddle_available:
-            methods.append("paddle")
+        # Создаем матрицу данных
+        max_rows = structure['rows']
+        max_cols = structure['max_cols']
         
-        return methods
+        # Инициализируем пустую матрицу
+        table_data = [['' for _ in range(max_cols)] for _ in range(max_rows)]
+        
+        # Заполняем данными
+        for cell in structure['cells']:
+            row = cell['row']
+            col = cell['col']
+            text = cell['text']
+            
+            if row < max_rows and col < max_cols:
+                table_data[row][col] = text
+        
+        return table_data
     
-    def is_available(self) -> bool:
-        """Проверка доступности экстрактора таблиц"""
-        return any([self.camelot_available, self.tabula_available, self.paddle_available])
+    def _deduplicate_tables(self, tables: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """Убирает дубликаты таблиц"""
+        unique_tables = []
+        seen_content = set()
+        
+        for table in tables:
+            # Создаем хеш содержимого для сравнения
+            content_hash = self._create_table_hash(table)
+            
+            if content_hash not in seen_content:
+                seen_content.add(content_hash)
+                unique_tables.append(table)
+            else:
+                logger.debug(f"Duplicate table found, skipping")
+        
+        return unique_tables
+    
+    def _create_table_hash(self, table: Dict[str, Any]) -> str:
+        """Создает хеш таблицы для сравнения"""
+        data = table.get('data', [])
+        if not data:
+            return ""
+        
+        # Создаем строку для хеширования
+        content_str = ""
+        for row in data:
+            for cell in row:
+                content_str += str(cell) + "|"
+        
+        import hashlib
+        return hashlib.md5(content_str.encode()).hexdigest()
+    
+    def _sort_tables_by_quality(self, tables: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """Сортирует таблицы по качеству извлечения"""
+        def quality_score(table):
+            # Базовый скор
+            score = 0
+            
+            # Точность извлечения
+            accuracy = table.get('accuracy', 0)
+            score += accuracy * 0.4
+            
+            # Количество пробелов (меньше = лучше)
+            whitespace = table.get('whitespace', 100)
+            score += max(0, 100 - whitespace) * 0.3
+            
+            # Размер таблицы (больше = лучше)
+            rows = table.get('rows', 0)
+            cols = table.get('cols', 0)
+            score += min(rows * cols, 100) * 0.2
+            
+            # Метод извлечения (приоритет)
+            method = table.get('extraction_method', '')
+            if 'camelot' in method:
+                score += 20
+            elif 'tabula' in method:
+                score += 15
+            elif 'paddleocr' in method:
+                score += 10
+            
+            return score
+        
+        return sorted(tables, key=quality_score, reverse=True)
+    
+    def get_extraction_stats(self, tables: List[Dict[str, Any]]) -> Dict[str, Any]:
+        """Возвращает статистику извлечения таблиц"""
+        if not tables:
+            return {}
+        
+        methods = {}
+        total_accuracy = 0
+        total_whitespace = 0
+        
+        for table in tables:
+            method = table.get('extraction_method', 'unknown')
+            methods[method] = methods.get(method, 0) + 1
+            
+            total_accuracy += table.get('accuracy', 0)
+            total_whitespace += table.get('whitespace', 0)
+        
+        return {
+            'total_tables': len(tables),
+            'methods_used': methods,
+            'average_accuracy': total_accuracy / len(tables),
+            'average_whitespace': total_whitespace / len(tables),
+            'best_method': max(methods.items(), key=lambda x: x[1])[0] if methods else 'none'
+        }

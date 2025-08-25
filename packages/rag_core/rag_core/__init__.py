@@ -21,6 +21,7 @@ from .embeddings.embedding_service import EmbeddingService
 from .vectorstore.pgvector_store import PgVectorStore
 from .rag_pipeline import RAGPipeline
 from .ocr.ocr_processor import OCRProcessor
+from .tables.table_extractor import TableExtractor
 
 __version__ = "0.1.0"
 __author__ = "RAG Platform Team"
@@ -44,4 +45,7 @@ __all__ = [
     
     # OCR processing
     "OCRProcessor",
+    
+    # Table extraction
+    "TableExtractor",
 ]
