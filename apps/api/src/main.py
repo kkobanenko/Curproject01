@@ -1,199 +1,228 @@
 """
-FastAPI сервис для RAG-платформы
-Основные эндпоинты: поиск, ответы, загрузка документов
+FastAPI приложение для RAG Platform
 """
 
-import os
-import logging
-from typing import List, Optional
-from fastapi import FastAPI, HTTPException, UploadFile, File, Depends, BackgroundTasks
+from fastapi import FastAPI, Request, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.middleware.trustedhost import TrustedHostMiddleware
 from fastapi.responses import JSONResponse
-import uvicorn
+from contextlib import asynccontextmanager
+import logging
+import time
+from typing import Dict, Any
 
-from .routers import search_router, documents_router, chat_router
-from .services.rag_pipeline import RAGPipeline
-from .services.embeddings import EmbeddingService
-from .services.vectorstore import VectorStoreService
-from .schemas.common import HealthResponse, ErrorResponse
+from .routers import search, documents, answers, feedback, webhooks
 from .settings import get_settings
+from .services.health_check import HealthChecker
 
 # Настройка логирования
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
+# Глобальные переменные
+settings = get_settings()
+health_checker = HealthChecker()
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """Управление жизненным циклом приложения"""
+    # Запуск
+    logger.info("🚀 Запуск RAG Platform API...")
+    
+    # Проверка здоровья системы
+    try:
+        health_status = await health_checker.check_all()
+        if health_status['overall_status'] == 'healthy':
+            logger.info("✅ Система здорова, API готов к работе")
+        else:
+            logger.warning(f"⚠️ Система имеет проблемы: {health_status['issues']}")
+    except Exception as e:
+        logger.error(f"❌ Ошибка проверки здоровья системы: {e}")
+    
+    yield
+    
+    # Завершение
+    logger.info("🛑 Завершение работы RAG Platform API")
+
 # Создание FastAPI приложения
 app = FastAPI(
     title="RAG Platform API",
-    description="API для RAG-платформы с семантическим поиском и генерацией ответов",
+    description="API для локальной RAG системы с поддержкой поиска, ответов и управления документами",
     version="1.0.0",
-    docs_url="/docs",
-    redoc_url="/redoc"
+    docs_url="/docs" if settings.debug else None,
+    redoc_url="/redoc" if settings.debug else None,
+    lifespan=lifespan
 )
 
-# CORS middleware
+# Middleware
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # В продакшене ограничить
+    allow_origins=settings.cors_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-# Подключение роутеров
-app.include_router(search_router, prefix="/api/v1", tags=["search"])
-app.include_router(documents_router, prefix="/api/v1", tags=["documents"])
-app.include_router(chat_router, prefix="/api/v1", tags=["chat"])
+app.add_middleware(
+    TrustedHostMiddleware,
+    allowed_hosts=settings.allowed_hosts
+)
 
-@app.on_event("startup")
-async def startup_event():
-    """Инициализация при запуске"""
-    logger.info("Starting RAG Platform API...")
+# Middleware для логирования запросов
+@app.middleware("http")
+async def log_requests(request: Request, call_next):
+    """Логирование всех HTTP запросов"""
+    start_time = time.time()
     
-    try:
-        # Проверяем настройки
-        settings = get_settings()
-        logger.info(f"API configured for environment: {settings.app_env}")
-        
-        # Инициализируем сервисы
-        await _initialize_services()
-        
-        logger.info("RAG Platform API started successfully")
-        
-    except Exception as e:
-        logger.error(f"Failed to start API: {e}")
-        raise
+    # Логируем входящий запрос
+    logger.info(f"📥 {request.method} {request.url.path} - {request.client.host if request.client else 'unknown'}")
+    
+    # Обрабатываем запрос
+    response = await call_next(request)
+    
+    # Логируем результат
+    process_time = time.time() - start_time
+    logger.info(f"📤 {request.method} {request.url.path} - {response.status_code} - {process_time:.3f}s")
+    
+    # Добавляем заголовок времени обработки
+    response.headers["X-Process-Time"] = str(process_time)
+    
+    return response
 
-@app.on_event("shutdown")
-async def shutdown_event():
-    """Очистка при остановке"""
-    logger.info("Shutting down RAG Platform API...")
-
-async def _initialize_services():
-    """Инициализация основных сервисов"""
-    try:
-        # Проверяем доступность Ollama
-        embedding_service = EmbeddingService()
-        if await embedding_service.is_available():
-            logger.info("Embedding service (Ollama) is available")
-        else:
-            logger.warning("Embedding service (Ollama) is not available")
-        
-        # Проверяем подключение к векторному хранилищу
-        vector_store = VectorStoreService()
-        if await vector_store.is_available():
-            logger.info("Vector store (PostgreSQL + pgvector) is available")
-        else:
-            logger.warning("Vector store (PostgreSQL + pgvector) is not available")
-        
-        # Инициализируем RAG пайплайн
-        rag_pipeline = RAGPipeline()
-        logger.info("RAG pipeline initialized")
-        
-    except Exception as e:
-        logger.error(f"Error initializing services: {e}")
-        # Не прерываем запуск, но логируем ошибку
-
-@app.get("/", response_model=HealthResponse)
-async def root():
-    """Корневой эндпоинт"""
-    return HealthResponse(
-        status="healthy",
-        message="RAG Platform API is running",
-        version="1.0.0"
-    )
-
-@app.get("/health", response_model=HealthResponse)
-async def health_check():
-    """Проверка здоровья сервиса"""
-    try:
-        # Проверяем основные компоненты
-        checks = {}
-        
-        # Проверка Ollama
-        embedding_service = EmbeddingService()
-        checks["ollama"] = await embedding_service.is_available()
-        
-        # Проверка PostgreSQL
-        vector_store = VectorStoreService()
-        checks["postgresql"] = await vector_store.is_available()
-        
-        # Общий статус
-        overall_status = all(checks.values())
-        
-        return HealthResponse(
-            status="healthy" if overall_status else "degraded",
-            message="Service health check completed",
-            version="1.0.0",
-            details=checks
-        )
-        
-    except Exception as e:
-        logger.error(f"Health check failed: {e}")
-        return HealthResponse(
-            status="unhealthy",
-            message=f"Health check failed: {str(e)}",
-            version="1.0.0"
-        )
-
-@app.get("/api/v1/models", tags=["models"])
-async def list_models():
-    """Список доступных моделей"""
-    try:
-        embedding_service = EmbeddingService()
-        models = await embedding_service.list_models()
-        
-        return {
-            "models": models,
-            "default_embedding": "bge-m3",
-            "default_llm": "llama3:8b"
-        }
-        
-    except Exception as e:
-        logger.error(f"Error listing models: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-@app.get("/api/v1/stats", tags=["statistics"])
-async def get_statistics():
-    """Статистика платформы"""
-    try:
-        vector_store = VectorStoreService()
-        stats = await vector_store.get_statistics()
-        
-        return {
-            "vector_store": stats,
-            "platform": {
-                "version": "1.0.0",
-                "status": "running"
-            }
-        }
-        
-    except Exception as e:
-        logger.error(f"Error getting statistics: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
+# Middleware для обработки ошибок
 @app.exception_handler(Exception)
-async def global_exception_handler(request, exc):
+async def global_exception_handler(request: Request, exc: Exception):
     """Глобальный обработчик исключений"""
-    logger.error(f"Unhandled exception: {exc}")
+    logger.error(f"❌ Необработанная ошибка: {exc}", exc_info=True)
+    
     return JSONResponse(
         status_code=500,
-        content=ErrorResponse(
-            error="Internal server error",
-            message="An unexpected error occurred",
-            details=str(exc)
-        ).dict()
+        content={
+            "error": "Internal Server Error",
+            "message": "Произошла внутренняя ошибка сервера",
+            "request_id": getattr(request.state, 'request_id', 'unknown')
+        }
+    )
+
+@app.exception_handler(HTTPException)
+async def http_exception_handler(request: Request, exc: HTTPException):
+    """Обработчик HTTP исключений"""
+    logger.warning(f"⚠️ HTTP ошибка {exc.status_code}: {exc.detail}")
+    
+    return JSONResponse(
+        status_code=exc.status_code,
+        content={
+            "error": "HTTP Error",
+            "message": exc.detail,
+            "status_code": exc.status_code,
+            "request_id": getattr(request.state, 'request_id', 'unknown')
+        }
+    )
+
+# Подключение роутеров
+app.include_router(
+    search.router,
+    prefix="/api/v1/search",
+    tags=["search"]
+)
+
+app.include_router(
+    documents.router,
+    prefix="/api/v1/documents",
+    tags=["documents"]
+)
+
+app.include_router(
+    answers.router,
+    prefix="/api/v1/answers",
+    tags=["answers"]
+)
+
+app.include_router(
+    feedback.router,
+    prefix="/api/v1/feedback",
+    tags=["feedback"]
+)
+
+app.include_router(
+    webhooks.router,
+    prefix="/api/v1/webhooks",
+    tags=["webhooks"]
+)
+
+# Основные эндпоинты
+@app.get("/")
+async def root():
+    """Корневой эндпоинт"""
+    return {
+        "message": "RAG Platform API",
+        "version": "1.0.0",
+        "status": "running",
+        "docs": "/docs" if settings.debug else "disabled in production"
+    }
+
+@app.get("/health")
+async def health():
+    """Проверка здоровья API"""
+    return {
+        "status": "healthy",
+        "timestamp": time.time(),
+        "version": "1.0.0"
+    }
+
+@app.get("/health/detailed")
+async def health_detailed():
+    """Детальная проверка здоровья системы"""
+    try:
+        health_status = await health_checker.check_all()
+        return health_status
+    except Exception as e:
+        logger.error(f"Ошибка детальной проверки здоровья: {e}")
+        return {
+            "overall_status": "error",
+            "timestamp": time.time(),
+            "error": str(e)
+        }
+
+@app.get("/info")
+async def info():
+    """Информация о системе"""
+    return {
+        "name": "RAG Platform API",
+        "version": "1.0.0",
+        "description": "API для локальной RAG системы",
+        "features": [
+            "Семантический поиск по документам",
+            "Генерация ответов с цитированием",
+            "Управление документами",
+            "Сбор обратной связи",
+            "Webhook интеграции"
+        ],
+        "config": {
+            "debug": settings.debug,
+            "max_file_size": settings.max_file_size_mb,
+            "supported_formats": settings.supported_mime_types,
+            "chunk_size": settings.chunk_size,
+            "chunk_overlap": settings.chunk_overlap
+        }
+    }
+
+# Обработчик для несуществующих маршрутов
+@app.get("/{full_path:path}")
+async def catch_all(full_path: str):
+    """Обработчик для несуществующих маршрутов"""
+    raise HTTPException(
+        status_code=404,
+        detail=f"Маршрут '/{full_path}' не найден. Используйте /docs для просмотра доступных эндпоинтов."
     )
 
 if __name__ == "__main__":
-    # Запуск для разработки
-    port = int(os.getenv("API_PORT", 8080))
-    host = os.getenv("API_HOST", "0.0.0.0")
+    import uvicorn
     
     uvicorn.run(
         "main:app",
-        host=host,
-        port=port,
-        reload=True,
+        host=settings.host,
+        port=settings.port,
+        reload=settings.debug,
         log_level="info"
     )
