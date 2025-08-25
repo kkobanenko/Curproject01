@@ -1,7 +1,9 @@
 """
-OCR обработка для RAG-платформы
+OCR processing module for RAG Core.
 """
 
-from .ocr_processor import OCRProcessor, OCRResult, ImagePage
+from .ocr_processor import OCRProcessor
 
-__all__ = ["OCRProcessor", "OCRResult", "ImagePage"]
+__all__ = [
+    "OCRProcessor",
+]

@@ -50,6 +50,27 @@ class RAGPipeline:
             logger.info("DOCX parser registered")
         except Exception as e:
             logger.warning(f"Failed to register DOCX parser: {e}")
+        
+        try:
+            from .parsers.xlsx_parser import XLSXParser
+            self.parser_registry.register(XLSXParser())
+            logger.info("XLSX parser registered")
+        except Exception as e:
+            logger.warning(f"Failed to register XLSX parser: {e}")
+        
+        try:
+            from .parsers.html_parser import HTMLParser
+            self.parser_registry.register(HTMLParser())
+            logger.info("HTML parser registered")
+        except Exception as e:
+            logger.warning(f"Failed to register HTML parser: {e}")
+        
+        try:
+            from .parsers.eml_parser import EMLParser
+            self.parser_registry.register(EMLParser())
+            logger.info("EML parser registered")
+        except Exception as e:
+            logger.warning(f"Failed to register EML parser: {e}")
     
     async def process_document(self, file_path: Path) -> Dict[str, Any]:
         """Обрабатывает документ полностью: парсинг -> чанкинг -> эмбеддинги -> сохранение"""

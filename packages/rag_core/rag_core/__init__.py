@@ -13,10 +13,14 @@ This package provides:
 from .parsers.document_parser import DocumentParser, DocumentParserRegistry
 from .parsers.pdf_parser import PDFParser
 from .parsers.docx_parser import DOCXParser
+from .parsers.xlsx_parser import XLSXParser
+from .parsers.html_parser import HTMLParser
+from .parsers.eml_parser import EMLParser
 from .chunking.chunker import DocumentChunker, Chunk
 from .embeddings.embedding_service import EmbeddingService
 from .vectorstore.pgvector_store import PgVectorStore
 from .rag_pipeline import RAGPipeline
+from .ocr.ocr_processor import OCRProcessor
 
 __version__ = "0.1.0"
 __author__ = "RAG Platform Team"
@@ -34,4 +38,10 @@ __all__ = [
     # Parser implementations
     "PDFParser",
     "DOCXParser",
+    "XLSXParser",
+    "HTMLParser",
+    "EMLParser",
+    
+    # OCR processing
+    "OCRProcessor",
 ]
