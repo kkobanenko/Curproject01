@@ -8,9 +8,26 @@ from typing import Dict, Any, Optional, List
 import requests
 import base64
 from io import BytesIO
-import fitz  # PyMuPDF
-from docx import Document
-import xml.etree.ElementTree as ET
+
+# Опциональные импорты для различных форматов документов
+try:
+    import fitz  # PyMuPDF
+    PYMUPDF_AVAILABLE = True
+except ImportError:
+    PYMUPDF_AVAILABLE = False
+
+try:
+    from docx import Document
+    DOCX_AVAILABLE = True
+except ImportError:
+    DOCX_AVAILABLE = False
+
+try:
+    import xml.etree.ElementTree as ET
+    XML_AVAILABLE = True
+except ImportError:
+    XML_AVAILABLE = False
+
 import re
 
 

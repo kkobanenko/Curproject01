@@ -515,17 +515,26 @@ class QueryHistory:
             )
         
         with col2:
-            # Excel
-            buffer = BytesIO()
-            with pd.ExcelWriter(buffer, engine='openpyxl') as writer:
-                export_df.to_excel(writer, sheet_name='История запросов', index=False)
-            
-            st.download_button(
-                label="📥 Excel (вся история)",
-                data=buffer.getvalue(),
-                file_name=f"query_history_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx",
-                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-            )
+            # Excel (требует openpyxl)
+            try:
+                buffer = BytesIO()
+                with pd.ExcelWriter(buffer, engine='openpyxl') as writer:
+                    export_df.to_excel(writer, sheet_name='История запросов', index=False)
+                
+                st.download_button(
+                    label="📥 Excel (вся история)",
+                    data=buffer.getvalue(),
+                    file_name=f"query_history_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx",
+                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                )
+            except ImportError:
+                st.warning("📥 Для экспорта в Excel установите openpyxl: `pip install openpyxl`")
+                st.download_button(
+                    label="📥 Excel (недоступно)",
+                    data="",
+                    file_name="",
+                    disabled=True
+                )
         
         with col3:
             # JSON

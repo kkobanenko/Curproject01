@@ -201,7 +201,7 @@ class ExportManager:
             include_index = st.checkbox("Включить индекс", value=False, key="excel_index")
         
         with col2:
-            engine = st.selectbox("Движок", ['openpyxl', 'xlsxwriter'], key="excel_engine")
+            engine = st.selectbox("Движок", ['openpyxl', 'xlsxwriter'], key="excel_engine", help="openpyxl рекомендуется для лучшей совместимости")
             float_format = st.text_input("Формат чисел", value="%.2f", key="excel_float")
         
         return {
@@ -499,26 +499,30 @@ class ExportManager:
                     )
             
             elif export_format == 'excel':
-                if isinstance(data, pd.DataFrame):
-                    buffer = BytesIO()
-                    with pd.ExcelWriter(buffer, engine=options.get('engine', 'openpyxl')) as writer:
-                        data.to_excel(
-                            writer,
-                            sheet_name=options.get('sheet_name', 'Sheet1'),
-                            index=options.get('include_index', False),
-                            float_format=options.get('float_format', '%.2f')
-                        )
-                    return buffer.getvalue()
-                elif isinstance(data, list):
-                    df = pd.DataFrame(data)
-                    buffer = BytesIO()
-                    with pd.ExcelWriter(buffer, engine=options.get('engine', 'openpyxl')) as writer:
-                        df.to_excel(
-                            writer,
-                            sheet_name=options.get('sheet_name', 'Sheet1'),
-                            index=options.get('include_index', False)
-                        )
-                    return buffer.getvalue()
+                try:
+                    if isinstance(data, pd.DataFrame):
+                        buffer = BytesIO()
+                        with pd.ExcelWriter(buffer, engine=options.get('engine', 'openpyxl')) as writer:
+                            data.to_excel(
+                                writer,
+                                sheet_name=options.get('sheet_name', 'Sheet1'),
+                                index=options.get('include_index', False),
+                                float_format=options.get('float_format', '%.2f')
+                            )
+                        return buffer.getvalue()
+                    elif isinstance(data, list):
+                        df = pd.DataFrame(data)
+                        buffer = BytesIO()
+                        with pd.ExcelWriter(buffer, engine=options.get('engine', 'openpyxl')) as writer:
+                            df.to_excel(
+                                writer,
+                                sheet_name=options.get('sheet_name', 'Sheet1'),
+                                index=options.get('include_index', False)
+                            )
+                        return buffer.getvalue()
+                except ImportError:
+                    st.error("Для экспорта в Excel установите openpyxl: `pip install openpyxl`")
+                    return None
             
             elif export_format == 'json':
                 if isinstance(data, list):
