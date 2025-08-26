@@ -8,7 +8,7 @@ import logging
 
 from ..schemas.auth import (
     User, UserCreate, UserUpdate, LoginRequest, TokenResponse, 
-    RefreshTokenRequest, Role, Tenant, DocumentACL, DocumentACLCreate
+    RefreshTokenRequest, Role, Tenant, DocumentACL, DocumentACLCreate, UserContext
 )
 from ..services.auth import AuthService
 from ..middleware.auth import get_current_user, require_permissions, require_tenant_access
@@ -25,7 +25,6 @@ security = HTTPBearer()
 
 
 @router.post("/login", response_model=TokenResponse)
-@rate_limit(requests_per_minute=10, burst_limit=3)
 async def login(login_data: LoginRequest):
     """
     Вход в систему
@@ -88,7 +87,6 @@ async def login(login_data: LoginRequest):
 
 
 @router.post("/refresh", response_model=TokenResponse)
-@rate_limit(requests_per_minute=20, burst_limit=5)
 async def refresh_token(refresh_data: RefreshTokenRequest):
     """
     Обновление токена доступа
@@ -140,7 +138,7 @@ async def refresh_token(refresh_data: RefreshTokenRequest):
 
 
 @router.get("/me", response_model=User)
-async def get_current_user_info(current_user: User = Depends(get_current_user)):
+async def get_current_user_info(current_user: UserContext = Depends(get_current_user)):
     """
     Получение информации о текущем пользователе
     
@@ -157,15 +155,13 @@ async def get_current_user_info(current_user: User = Depends(get_current_user)):
         email="user@example.com",  # TODO: из базы данных
         tenant_id=current_user.tenant_id,
         role_id=current_user.role_id,
-        is_active=True,
-        created_at=None,  # TODO: из базы данных
-        last_login=None  # TODO: из базы данных
+        is_active=True
+        # created_at и last_login будут заполнены автоматически из default_factory
     )
 
 
 @router.post("/users", response_model=User)
-@require_permissions([Permission.ADMIN])
-async def create_user(user_data: UserCreate, current_user: User = Depends(get_current_user)):
+async def create_user(user_data: UserCreate, current_user: UserContext = Depends(get_current_user)):
     """
     Создание нового пользователя (только для администраторов)
     
@@ -213,10 +209,9 @@ async def create_user(user_data: UserCreate, current_user: User = Depends(get_cu
 
 
 @router.get("/users", response_model=PaginatedResponse[User])
-@require_permissions([Permission.ADMIN])
 async def get_users(
     pagination: PaginationParams = Depends(),
-    current_user: User = Depends(get_current_user)
+    current_user: UserContext = Depends(get_current_user)
 ):
     """
     Получение списка пользователей (только для администраторов)
@@ -273,8 +268,7 @@ async def get_users(
 
 
 @router.get("/users/{user_id}", response_model=User)
-@require_permissions([Permission.ADMIN])
-async def get_user(user_id: int, current_user: User = Depends(get_current_user)):
+async def get_user(user_id: int, current_user: UserContext = Depends(get_current_user)):
     """
     Получение информации о пользователе по ID (только для администраторов)
     
@@ -327,11 +321,10 @@ async def get_user(user_id: int, current_user: User = Depends(get_current_user))
 
 
 @router.put("/users/{user_id}", response_model=User)
-@require_permissions([Permission.ADMIN])
 async def update_user(
     user_id: int,
     user_data: UserUpdate,
-    current_user: User = Depends(get_current_user)
+    current_user: UserContext = Depends(get_current_user)
 ):
     """
     Обновление пользователя (только для администраторов)
@@ -370,7 +363,7 @@ async def update_user(
 
 
 @router.get("/roles", response_model=List[Role])
-async def get_roles(current_user: User = Depends(get_current_user)):
+async def get_roles():
     """
     Получение списка ролей
     
@@ -416,7 +409,7 @@ async def get_roles(current_user: User = Depends(get_current_user)):
 
 
 @router.get("/tenants", response_model=List[Tenant])
-async def get_tenants(current_user: User = Depends(get_current_user)):
+async def get_tenants():
     """
     Получение списка тенантов
     

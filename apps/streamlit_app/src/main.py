@@ -10,14 +10,14 @@ from datetime import datetime
 import time
 
 # Импорт компонентов
-from .components.auth import LoginForm, UserProfile
-from .components.search import SearchForm, SearchResults
-from .components.chat import ChatInterface
-from .components.upload import DocumentUploader
-from .components.documents import DocumentList
+from components.auth import LoginForm, UserProfile
+from components.search import SearchForm, SearchResults
+from components.chat import ChatInterface
+from components.upload import DocumentUploader
+from components.documents import DocumentList
 
 # Настройки
-API_BASE_URL = os.getenv("API_BASE_URL", "http://localhost:8080")
+API_BASE_URL = os.getenv("API_BASE_URL", "http://localhost:8000")
 
 # Конфигурация страницы
 st.set_page_config(
@@ -188,6 +188,12 @@ def show_login_page():
 def show_main_interface():
     """Основной интерфейс после аутентификации"""
     
+    # Проверяем, что user_info существует
+    if not hasattr(st.session_state, 'user_info') or not st.session_state.user_info:
+        st.error("❌ Информация о пользователе недоступна. Войдите заново.")
+        st.session_state.clear()
+        st.rerun()
+    
     # Создаем профиль пользователя
     user_profile = UserProfile(st.session_state.user_info)
     user_profile.render_header()
@@ -326,6 +332,13 @@ def show_documents_page():
 
 def show_settings_page():
     """Страница настроек"""
+    # Проверяем, что user_info существует
+    if not hasattr(st.session_state, 'user_info') or not st.session_state.user_info:
+        st.error("❌ Информация о пользователе недоступна. Войдите заново.")
+        st.session_state.clear()
+        st.rerun()
+        return
+    
     user_profile = UserProfile(st.session_state.user_info)
     user_profile.render_settings_page()
 

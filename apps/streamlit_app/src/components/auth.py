@@ -50,9 +50,8 @@ class LoginForm:
                     remember_me = st.checkbox("Запомнить меня")
                 
                 with col2:
-                    forgot_password = st.button("Забыли пароль?")
-                    if forgot_password:
-                        st.info("Функция восстановления пароля в разработке")
+                    # Кнопка "Забыли пароль?" должна быть вне формы
+                    pass
                 
                 # Кнопки
                 col1, col2 = st.columns(2)
@@ -70,6 +69,11 @@ class LoginForm:
                 # Обработка отправки
                 if submitted and username and password:
                     return self._authenticate(username, password, remember_me)
+        
+        # Кнопка "Забыли пароль?" вне формы
+        forgot_password = st.button("Забыли пароль?", type="secondary")
+        if forgot_password:
+            st.info("Функция восстановления пароля в разработке")
         
         return None
     
@@ -120,6 +124,10 @@ class UserProfile:
         st.subheader("👤 Профиль")
         
         user = self.user_info
+        
+        if not user:
+            st.warning("⚠️ Информация о пользователе недоступна")
+            return
         
         # Основная информация
         st.write(f"**Имя:** {user.get('username', 'N/A')}")
@@ -174,6 +182,10 @@ class UserProfile:
         st.header("⚙️ Настройки профиля")
         
         user = self.user_info
+        
+        if not user:
+            st.warning("⚠️ Информация о пользователе недоступна")
+            return
         
         # Информация о профиле
         st.subheader("👤 Информация о профиле")

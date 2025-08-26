@@ -1,9 +1,11 @@
 """
 Общие схемы для API
 """
-from typing import Optional, Dict, Any
+from typing import Optional, Dict, Any, Generic, TypeVar
 from pydantic import BaseModel, Field
 from datetime import datetime
+
+T = TypeVar('T')
 
 
 class HealthResponse(BaseModel):
@@ -29,9 +31,9 @@ class PaginationParams(BaseModel):
     size: int = Field(default=20, ge=1, le=100, description="Размер страницы")
 
 
-class PaginatedResponse(BaseModel):
+class PaginatedResponse(BaseModel, Generic[T]):
     """Ответ с пагинацией"""
-    items: list = Field(..., description="Элементы")
+    items: list[T] = Field(..., description="Элементы")
     total: int = Field(..., description="Общее количество")
     page: int = Field(..., description="Текущая страница")
     size: int = Field(..., description="Размер страницы")

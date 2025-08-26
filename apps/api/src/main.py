@@ -32,10 +32,10 @@ async def lifespan(app: FastAPI):
     # Проверка здоровья системы
     try:
         health_status = await health_checker.check_all()
-        if health_status['overall_status'] == 'healthy':
+        if health_status['status'] == 'healthy':
             logger.info("✅ Система здорова, API готов к работе")
         else:
-            logger.warning(f"⚠️ Система имеет проблемы: {health_status['issues']}")
+            logger.warning(f"⚠️ Система имеет проблемы: {health_status['message']}")
     except Exception as e:
         logger.error(f"❌ Ошибка проверки здоровья системы: {e}")
     

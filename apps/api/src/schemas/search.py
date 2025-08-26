@@ -4,6 +4,7 @@
 from typing import List, Optional, Dict, Any
 from pydantic import BaseModel, Field
 from datetime import datetime
+from enum import Enum
 
 
 class SearchRequest(BaseModel):
@@ -35,3 +36,20 @@ class SearchResponse(BaseModel):
     total: int = Field(..., description="Общее количество результатов")
     processing_time: float = Field(..., description="Время обработки в секундах")
     timestamp: datetime = Field(default_factory=datetime.utcnow, description="Временная метка")
+
+
+class SearchFilters(BaseModel):
+    """Фильтры для поиска"""
+    tenant_id: Optional[str] = Field(None, description="ID тенанта")
+    doc_type: Optional[str] = Field(None, description="Тип документа")
+    date_from: Optional[datetime] = Field(None, description="Дата от")
+    date_to: Optional[datetime] = Field(None, description="Дата до")
+    tags: Optional[List[str]] = Field(None, description="Теги")
+    min_score: Optional[float] = Field(None, ge=0.0, le=1.0, description="Минимальный скор релевантности")
+
+
+class SearchType(str, Enum):
+    """Тип поиска"""
+    SEMANTIC = "semantic"
+    KEYWORD = "keyword"
+    HYBRID = "hybrid"

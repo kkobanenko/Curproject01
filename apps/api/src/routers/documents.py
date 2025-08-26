@@ -93,7 +93,7 @@ async def upload_document(
 async def list_documents(
     current_user: User = Depends(get_current_user),
     pagination: PaginationParams = Depends(),
-    status: Optional[DocumentStatus] = Query(None),
+    status: Optional[str] = Query(None, description="Статус документа"),
     mime_type: Optional[str] = Query(None),
     tags: Optional[str] = Query(None),
     date_from: Optional[str] = Query(None),
