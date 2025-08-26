@@ -15,7 +15,7 @@ check_port() {
     local port=$1
     local service_name=$2
     
-    if lsof -Pi :$port -sTCP:LISTEN -t >/dev/null 2>&1; then
+    if netstat -tln 2>/dev/null | grep ":$port " >/dev/null 2>&1; then
         echo "✅ $service_name уже запущен на порту $port"
         return 0
     else
