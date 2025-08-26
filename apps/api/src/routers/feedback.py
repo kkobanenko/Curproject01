@@ -15,7 +15,8 @@ from ..schemas.feedback import (
     FeedbackAnalytics
 )
 from ..services.feedback_service import FeedbackService
-from ..services.authorization import get_current_user, User
+from ..middleware.auth import get_current_user
+from ..schemas.auth import User
 from ..settings import get_settings
 from fastapi.responses import JSONResponse
 

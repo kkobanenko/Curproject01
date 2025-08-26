@@ -16,7 +16,8 @@ from ..schemas.answers import (
     RAGContext
 )
 from ..services.rag_service import RAGService
-from ..services.authorization import get_current_user, User
+from ..middleware.auth import get_current_user
+from ..schemas.auth import User
 from ..settings import get_settings
 
 logger = logging.getLogger(__name__)

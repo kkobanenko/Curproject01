@@ -11,7 +11,7 @@ import logging
 import time
 from typing import Dict, Any
 
-from .routers import search, documents, answers, feedback, webhooks
+from .routers import search, documents, answers, feedback, webhooks, auth
 from .settings import get_settings
 from .services.health_check import HealthChecker
 
@@ -148,6 +148,12 @@ app.include_router(
     webhooks.router,
     prefix="/api/v1/webhooks",
     tags=["webhooks"]
+)
+
+app.include_router(
+    auth.router,
+    prefix="/api/v1",
+    tags=["auth"]
 )
 
 # Основные эндпоинты

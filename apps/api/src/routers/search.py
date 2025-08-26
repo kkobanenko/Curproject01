@@ -17,7 +17,8 @@ from ..schemas.search import (
 )
 from ..schemas.common import PaginationParams
 from ..services.search_service import SearchService
-from ..services.authorization import get_current_user, User
+from ..middleware.auth import get_current_user
+from ..schemas.auth import User
 from ..settings import get_settings
 
 logger = logging.getLogger(__name__)
