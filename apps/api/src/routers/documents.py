@@ -173,6 +173,44 @@ async def get_document(
             detail=f"Ошибка получения документа: {str(e)}"
         )
 
+@router.get("/{document_id}/content")
+async def get_document_content(
+    document_id: str,
+    current_user: User = Depends(get_current_user)
+):
+    """
+    Получение содержимого документа
+    
+    Возвращает:
+    - Извлеченный текст
+    - Таблицы
+    - Метаданные
+    """
+    try:
+        logger.info(f"📖 Получение содержимого документа {document_id}")
+        
+        content = await document_service.get_document_content(
+            document_id=document_id,
+            user=current_user
+        )
+        
+        if not content:
+            raise HTTPException(
+                status_code=404,
+                detail="Содержимое документа не найдено"
+            )
+        
+        return content
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"❌ Ошибка получения содержимого документа: {e}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Ошибка получения содержимого документа: {str(e)}"
+        )
+
 @router.get("/{document_id}/download")
 async def download_document(
     document_id: str,
