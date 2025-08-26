@@ -15,6 +15,11 @@ from components.search import SearchForm, SearchResults
 from components.chat import ChatInterface
 from components.upload import DocumentUploader
 from components.documents import DocumentList
+from components.document_preview import DocumentPreview
+from components.table_visualizer import TableVisualizer
+from components.query_history import QueryHistory
+from components.export_manager import ExportManager
+from components.user_settings import UserSettings
 
 # Настройки
 API_BASE_URL = os.getenv("API_BASE_URL", "http://localhost:8000")
@@ -204,7 +209,7 @@ def show_main_interface():
         
         page = st.selectbox(
             "Выберите раздел",
-            ["🏠 Главная", "🔍 Поиск", "💬 Чат", "📤 Загрузка", "📚 Документы", "⚙️ Настройки"]
+            ["🏠 Главная", "🔍 Поиск", "💬 Чат", "📤 Загрузка", "📚 Документы", "📄 Предпросмотр", "📊 Визуализация", "📚 История", "💾 Экспорт", "⚙️ Настройки"]
         )
         
         st.divider()
@@ -239,6 +244,14 @@ def show_main_interface():
         show_upload_page()
     elif page == "📚 Документы":
         show_documents_page()
+    elif page == "📄 Предпросмотр":
+        show_document_preview_page()
+    elif page == "📊 Визуализация":
+        show_table_visualization_page()
+    elif page == "📚 История":
+        show_query_history_page()
+    elif page == "💾 Экспорт":
+        show_export_page()
     elif page == "⚙️ Настройки":
         show_settings_page()
 
@@ -339,8 +352,141 @@ def show_settings_page():
         st.rerun()
         return
     
-    user_profile = UserProfile(st.session_state.user_info)
-    user_profile.render_settings_page()
+    user_settings = UserSettings(API_BASE_URL, st.session_state.access_token)
+    user_settings.render()
+
+
+def show_document_preview_page():
+    """Страница предпросмотра документов"""
+    st.header("📄 Предпросмотр документов")
+    
+    # Получаем список документов для выбора
+    documents_response = get_documents(token=st.session_state.access_token)
+    
+    if "error" in documents_response:
+        st.error(f"Ошибка получения документов: {documents_response['error']}")
+        return
+    
+    documents = documents_response.get('items', [])
+    
+    if not documents:
+        st.info("📭 Нет доступных документов для предпросмотра")
+        return
+    
+    # Выбор документа
+    selected_doc = st.selectbox(
+        "Выберите документ для предпросмотра",
+        documents,
+        format_func=lambda x: f"{x.get('title', 'Без названия')} ({x.get('file_type', 'Неизвестно')})"
+    )
+    
+    if selected_doc:
+        document_preview = DocumentPreview(API_BASE_URL, st.session_state.access_token)
+        document_preview.render(selected_doc['id'], selected_doc)
+
+
+def show_table_visualization_page():
+    """Страница визуализации таблиц"""
+    st.header("📊 Визуализация таблиц")
+    
+    # Получаем список документов с таблицами
+    documents_response = get_documents(token=st.session_state.access_token)
+    
+    if "error" in documents_response:
+        st.error(f"Ошибка получения документов: {documents_response['error']}")
+        return
+    
+    documents = documents_response.get('items', [])
+    
+    if not documents:
+        st.info("📭 Нет доступных документов для визуализации")
+        return
+    
+    # Выбор документа
+    selected_doc = st.selectbox(
+        "Выберите документ с таблицами",
+        documents,
+        format_func=lambda x: f"{x.get('title', 'Без названия')} ({x.get('file_type', 'Неизвестно')})"
+    )
+    
+    if selected_doc:
+        # Получаем содержимое документа
+        try:
+            headers = {"Authorization": f"Bearer {st.session_state.access_token}"}
+            response = requests.get(
+                f"{API_BASE_URL}/api/v1/documents/{selected_doc['id']}/content",
+                headers=headers
+            )
+            
+            if response.status_code == 200:
+                content = response.json()
+                
+                if content.get('tables'):
+                    # Показываем визуализацию для каждой таблицы
+                    for i, table in enumerate(content['tables']):
+                        st.subheader(f"📊 Таблица {i+1}")
+                        
+                        table_visualizer = TableVisualizer()
+                        table_visualizer.render(table, {
+                            'id': f"{selected_doc['id']}_table_{i}",
+                            'title': f"Таблица {i+1} из {selected_doc.get('title', 'Документа')}",
+                            'source': selected_doc.get('title', 'Неизвестно'),
+                            'rows': len(table.get('data', [])),
+                            'columns': len(table.get('data', [[]])[0]) if table.get('data') else 0
+                        })
+                        
+                        st.divider()
+                else:
+                    st.info("📭 В выбранном документе не найдено таблиц")
+            else:
+                st.error(f"Ошибка получения содержимого документа: {response.status_code}")
+                
+        except Exception as e:
+            st.error(f"Ошибка: {str(e)}")
+
+
+def show_query_history_page():
+    """Страница истории запросов"""
+    query_history = QueryHistory(API_BASE_URL, st.session_state.access_token)
+    query_history.render()
+
+
+def show_export_page():
+    """Страница экспорта данных"""
+    st.header("💾 Экспорт данных")
+    
+    # Выбор типа данных для экспорта
+    export_type = st.selectbox(
+        "Выберите тип данных для экспорта",
+        ["Результаты поиска", "История запросов", "Список документов", "Данные пользователя"]
+    )
+    
+    if export_type == "Результаты поиска":
+        st.info("🔍 Сначала выполните поиск, затем экспортируйте результаты")
+        search_query = st.text_input("Введите поисковый запрос")
+        if search_query and st.button("🔍 Выполнить поиск"):
+            results = search_documents(search_query, token=st.session_state.access_token)
+            if "error" not in results:
+                export_manager = ExportManager()
+                export_manager.render(results.get('items', []), "search_results", "Результаты поиска")
+    
+    elif export_type == "История запросов":
+        st.info("📚 Экспорт истории запросов")
+        export_manager = ExportManager()
+        # Здесь можно передать реальные данные истории
+        export_manager.render([], "query_history", "История запросов")
+    
+    elif export_type == "Список документов":
+        st.info("📚 Экспорт списка документов")
+        documents_response = get_documents(token=st.session_state.access_token)
+        if "error" not in documents_response:
+            export_manager = ExportManager()
+            export_manager.render(documents_response.get('items', []), "documents", "Список документов")
+    
+    elif export_type == "Данные пользователя":
+        st.info("👤 Экспорт данных пользователя")
+        export_manager = ExportManager()
+        export_manager.render(st.session_state.user_info, "user_data", "Данные пользователя")
 
 
 def main():
