@@ -4,11 +4,20 @@ Streamlit приложение для RAG платформы
 import streamlit as st
 import requests
 import json
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional
 import os
+from datetime import datetime
+import time
+
+# Импорт компонентов
+from .components.auth import LoginForm, UserProfile
+from .components.search import SearchForm, SearchResults
+from .components.chat import ChatInterface
+from .components.upload import DocumentUploader
+from .components.documents import DocumentList
 
 # Настройки
-API_BASE_URL = os.getenv("API_BASE_URL", "http://localhost:8081")
+API_BASE_URL = os.getenv("API_BASE_URL", "http://localhost:8080")
 
 # Конфигурация страницы
 st.set_page_config(
@@ -25,6 +34,15 @@ if "chat_history" not in st.session_state:
 if "current_conversation" not in st.session_state:
     st.session_state.current_conversation = None
 
+if "access_token" not in st.session_state:
+    st.session_state.access_token = None
+
+if "user_info" not in st.session_state:
+    st.session_state.user_info = None
+
+if "is_authenticated" not in st.session_state:
+    st.session_state.is_authenticated = False
+
 
 def check_api_health() -> bool:
     """Проверка доступности API"""
@@ -35,71 +53,144 @@ def check_api_health() -> bool:
         return False
 
 
-def search_documents(query: str, top_k: int = 20) -> Dict[str, Any]:
+
+
+
+
+
+
+def search_documents(query: str, top_k: int = 20, token: str = None) -> Dict[str, Any]:
     """Поиск документов"""
     try:
+        headers = {}
+        if token:
+            headers["Authorization"] = f"Bearer {token}"
+            
         response = requests.post(
             f"{API_BASE_URL}/api/v1/search",
-            json={"query": query, "top_k": top_k}
+            json={"query": query, "top_k": top_k},
+            headers=headers
         )
         if response.status_code == 200:
             return response.json()
         else:
-            return {"error": f"Search failed: {response.status_code}"}
+            return {"error": f"Ошибка поиска: {response.status_code}"}
     except Exception as e:
-        return {"error": f"Search error: {str(e)}"}
+        return {"error": f"Ошибка соединения: {str(e)}"}
 
 
-def chat_with_rag(message: str, top_k: int = 5) -> Dict[str, Any]:
+def chat_with_rag(message: str, top_k: int = 5, token: str = None) -> Dict[str, Any]:
     """Чат с RAG системой"""
     try:
+        headers = {}
+        if token:
+            headers["Authorization"] = f"Bearer {token}"
+            
         response = requests.post(
-            f"{API_BASE_URL}/api/v1/chat",
+            f"{API_BASE_URL}/api/v1/answers/generate",
             json={
-                "message": message,
+                "question": message,
                 "top_k": top_k,
-                "use_context": True
-            }
+                "include_citations": True
+            },
+            headers=headers
         )
         if response.status_code == 200:
             return response.json()
         else:
-            return {"error": f"Chat failed: {response.status_code}"}
+            return {"error": f"Ошибка чата: {response.status_code}"}
     except Exception as e:
-        return {"error": f"Chat error: {str(e)}"}
+        return {"error": f"Ошибка соединения: {str(e)}"}
 
 
-def upload_document(file, title: str = None) -> Dict[str, Any]:
+def upload_document(file, title: str = None, token: str = None) -> Dict[str, Any]:
     """Загрузка документа"""
     try:
         files = {"file": file}
         data = {"title": title} if title else {}
         
+        headers = {}
+        if token:
+            headers["Authorization"] = f"Bearer {token}"
+        
         response = requests.post(
-            f"{API_BASE_URL}/api/v1/upload",
+            f"{API_BASE_URL}/api/v1/documents/upload",
             files=files,
-            data=data
+            data=data,
+            headers=headers
         )
         
         if response.status_code == 200:
             return response.json()
         else:
-            return {"error": f"Upload failed: {response.status_code}"}
+            return {"error": f"Ошибка загрузки: {response.status_code}"}
     except Exception as e:
-        return {"error": f"Upload error: {str(e)}"}
+        return {"error": f"Ошибка соединения: {str(e)}"}
 
 
-def main():
-    """Основная функция приложения"""
+def get_documents(page: int = 1, size: int = 20, token: str = None) -> Dict[str, Any]:
+    """Получение списка документов"""
+    try:
+        headers = {}
+        if token:
+            headers["Authorization"] = f"Bearer {token}"
+            
+        response = requests.get(
+            f"{API_BASE_URL}/api/v1/documents",
+            params={"page": page, "size": size},
+            headers=headers
+        )
+        
+        if response.status_code == 200:
+            return response.json()
+        else:
+            return {"error": f"Ошибка получения документов: {response.status_code}"}
+    except Exception as e:
+        return {"error": f"Ошибка соединения: {str(e)}"}
+
+
+def get_user_info(token: str) -> Dict[str, Any]:
+    """Получение информации о пользователе"""
+    try:
+        headers = {"Authorization": f"Bearer {token}"}
+        response = requests.get(
+            f"{API_BASE_URL}/api/v1/auth/me",
+            headers=headers
+        )
+        if response.status_code == 200:
+            return response.json()
+        else:
+            return {"error": f"Ошибка получения данных: {response.status_code}"}
+    except Exception as e:
+        return {"error": f"Ошибка соединения: {str(e)}"}
+
+
+def show_login_page():
+    """Страница входа в систему"""
+    login_form = LoginForm(API_BASE_URL)
+    result = login_form.render()
     
-    # Заголовок
-    st.title("🔍 RAG Platform")
-    st.markdown("Платформа для семантического поиска и анализа документов")
+    if result:
+        # Сохраняем токен и информацию о пользователе
+        st.session_state.access_token = result["access_token"]
+        st.session_state.is_authenticated = True
+        
+        # Получаем информацию о пользователе
+        user_info = get_user_info(result["access_token"])
+        if "error" not in user_info:
+            st.session_state.user_info = user_info
+        
+        st.success("✅ Вход выполнен успешно!")
+        time.sleep(1)
+        st.rerun()
+
+
+def show_main_interface():
+    """Основной интерфейс после аутентификации"""
     
-    # Проверка API
-    if not check_api_health():
-        st.error("❌ API недоступен. Проверьте, что сервис запущен.")
-        st.stop()
+    # Создаем профиль пользователя
+    user_profile = UserProfile(st.session_state.user_info)
+    user_profile.render_header()
     
     # Боковая панель
     with st.sidebar:
@@ -107,7 +198,7 @@ def main():
         
         page = st.selectbox(
             "Выберите раздел",
-            ["Поиск", "Чат", "Загрузка", "Документы"]
+            ["🏠 Главная", "🔍 Поиск", "💬 Чат", "📤 Загрузка", "📚 Документы", "⚙️ Настройки"]
         )
         
         st.divider()
@@ -127,235 +218,131 @@ def main():
                 st.error("❌ Неизвестный статус")
         except:
             st.error("❌ Не удалось получить статус")
+        
+        # Профиль пользователя в боковой панели
+        user_profile.render_sidebar()
     
     # Основной контент
-    if page == "Поиск":
+    if page == "🏠 Главная":
+        show_home_page()
+    elif page == "🔍 Поиск":
         show_search_page()
-    elif page == "Чат":
+    elif page == "💬 Чат":
         show_chat_page()
-    elif page == "Загрузка":
+    elif page == "📤 Загрузка":
         show_upload_page()
-    elif page == "Документы":
+    elif page == "📚 Документы":
         show_documents_page()
+    elif page == "⚙️ Настройки":
+        show_settings_page()
+
+
+def show_home_page():
+    """Главная страница"""
+    st.header("🏠 Добро пожаловать в RAG Platform")
+    
+    # Статистика
+    col1, col2, col3, col4 = st.columns(4)
+    
+    with col1:
+        st.metric(
+            label="📚 Документов",
+            value="0",  # TODO: получить из API
+            delta="+0"
+        )
+    
+    with col2:
+        st.metric(
+            label="🔍 Поисков",
+            value="0",  # TODO: получить из API
+            delta="+0"
+        )
+    
+    with col3:
+        st.metric(
+            label="💬 Сообщений",
+            value="0",  # TODO: получить из API
+            delta="+0"
+        )
+    
+    with col4:
+        st.metric(
+            label="⏱️ Время ответа",
+            value="0.5s",  # TODO: получить из API
+            delta="-0.1s"
+        )
+    
+    st.divider()
+    
+    # Быстрые действия
+    st.subheader("🚀 Быстрые действия")
+    
+    col1, col2 = st.columns(2)
+    
+    with col1:
+        if st.button("🔍 Начать поиск", use_container_width=True):
+            st.switch_page("🔍 Поиск")
+    
+    with col2:
+        if st.button("💬 Открыть чат", use_container_width=True):
+            st.switch_page("💬 Чат")
+    
+    # Последние документы
+    st.subheader("📚 Последние документы")
+    st.info("Функция в разработке")
+    
+    # Последние поиски
+    st.subheader("🔍 Последние поиски")
+    st.info("Функция в разработке")
 
 
 def show_search_page():
     """Страница поиска"""
-    st.header("🔍 Поиск документов")
+    search_form = SearchForm(API_BASE_URL, st.session_state.access_token)
+    results = search_form.render()
     
-    # Форма поиска
-    with st.form("search_form"):
-        col1, col2 = st.columns([3, 1])
-        
-        with col1:
-            query = st.text_input(
-                "Поисковый запрос",
-                placeholder="Введите ваш запрос...",
-                help="Опишите, что вы ищете"
-            )
-        
-        with col2:
-            top_k = st.number_input("Количество результатов", min_value=1, max_value=100, value=20)
-        
-        submitted = st.form_submit_button("🔍 Найти", use_container_width=True)
-    
-    if submitted and query:
-        with st.spinner("Выполняется поиск..."):
-            results = search_documents(query, top_k)
-            
-            if "error" in results:
-                st.error(f"Ошибка поиска: {results['error']}")
-            else:
-                st.success(f"Найдено {results['total']} результатов")
-                
-                # Отображение результатов
-                for i, result in enumerate(results['results']):
-                    with st.expander(f"Результат {i+1} (релевантность: {result['score']:.3f})"):
-                        col1, col2 = st.columns([1, 3])
-                        
-                        with col1:
-                            st.write(f"**Тип:** {result['kind']}")
-                            st.write(f"**Страница:** {result.get('page_no', 'N/A')}")
-                        
-                        with col2:
-                            if result['kind'] == 'table':
-                                st.write("**Таблица:**")
-                                st.html(result.get('table_html', ''))
-                            else:
-                                st.write("**Текст:**")
-                                st.write(result.get('content', '')[:500] + "..." if len(result.get('content', '')) > 500 else result.get('content', ''))
-                
-                # Статистика
-                st.info(f"⏱️ Время обработки: {results['processing_time']:.3f} сек")
+    if results:
+        search_results = SearchResults(results)
+        search_results.render()
 
 
 def show_chat_page():
     """Страница чата"""
-    st.header("💬 Чат с документами")
-    
-    # Параметры чата
-    col1, col2 = st.columns([3, 1])
-    
-    with col1:
-        user_message = st.text_input(
-            "Ваше сообщение",
-            placeholder="Задайте вопрос о документах...",
-            key="user_input"
-        )
-    
-    with col2:
-        top_k = st.number_input("Контекст", min_value=1, max_value=20, value=5)
-    
-    # Кнопка отправки
-    if st.button("💬 Отправить", use_container_width=True) and user_message:
-        # Добавляем сообщение пользователя в историю
-        st.session_state.chat_history.append({
-            "role": "user",
-            "content": user_message
-        })
-        
-        # Получаем ответ от RAG
-        with st.spinner("Генерируется ответ..."):
-            response = chat_with_rag(user_message, top_k)
-            
-            if "error" in response:
-                st.error(f"Ошибка чата: {response['error']}")
-            else:
-                # Добавляем ответ в историю
-                st.session_state.chat_history.append({
-                    "role": "assistant",
-                    "content": response['message']
-                })
-                
-                # Обновляем ID беседы
-                st.session_state.current_conversation = response['conversation_id']
-        
-        # Очищаем поле ввода
-        st.rerun()
-    
-    # Отображение истории чата
-    st.subheader("История беседы")
-    
-    if not st.session_state.chat_history:
-        st.info("Начните беседу, отправив первое сообщение")
-    else:
-        for message in st.session_state.chat_history:
-            if message["role"] == "user":
-                st.chat_message("user").write(message["content"])
-            else:
-                st.chat_message("assistant").write(message["content"])
-        
-        # Кнопка очистки истории
-        if st.button("🗑️ Очистить историю"):
-            st.session_state.chat_history = []
-            st.session_state.current_conversation = None
-            st.rerun()
+    chat_interface = ChatInterface(API_BASE_URL, st.session_state.access_token)
+    chat_interface.render()
 
 
 def show_upload_page():
     """Страница загрузки документов"""
-    st.header("📤 Загрузка документов")
-    
-    # Форма загрузки
-    with st.form("upload_form"):
-        uploaded_file = st.file_uploader(
-            "Выберите файл",
-            type=['pdf', 'docx', 'xlsx', 'html', 'txt', 'jpg', 'jpeg', 'png'],
-            help="Поддерживаемые форматы: PDF, DOCX, XLSX, HTML, TXT, изображения"
-        )
-        
-        title = st.text_input("Название документа (опционально)")
-        
-        submitted = st.form_submit_button("📤 Загрузить", use_container_width=True)
-    
-    if submitted and uploaded_file:
-        with st.spinner("Загружается документ..."):
-            result = upload_document(uploaded_file, title)
-            
-            if "error" in result:
-                st.error(f"Ошибка загрузки: {result['error']}")
-            else:
-                st.success("✅ Документ успешно загружен!")
-                
-                # Информация о загруженном файле
-                col1, col2 = st.columns(2)
-                
-                with col1:
-                    st.write(f"**ID файла:** {result['file_id']}")
-                    st.write(f"**Имя файла:** {result['filename']}")
-                
-                with col2:
-                    st.write(f"**Размер:** {result['size']} байт")
-                    st.write(f"**Тип:** {result['mime_type']}")
-                
-                st.info("Документ будет обработан в фоновом режиме. Вы можете отслеживать статус в разделе 'Документы'.")
+    document_uploader = DocumentUploader(API_BASE_URL, st.session_state.access_token)
+    document_uploader.render()
 
 
 def show_documents_page():
     """Страница документов"""
-    st.header("📚 Документы")
+    document_list = DocumentList(API_BASE_URL, st.session_state.access_token)
+    document_list.render()
+
+
+def show_settings_page():
+    """Страница настроек"""
+    user_profile = UserProfile(st.session_state.user_info)
+    user_profile.render_settings_page()
+
+
+def main():
+    """Основная функция приложения"""
     
-    # Параметры отображения
-    col1, col2 = st.columns([2, 1])
+    # Проверка API
+    if not check_api_health():
+        st.error("❌ API недоступен. Проверьте, что сервис запущен.")
+        st.stop()
     
-    with col1:
-        page = st.number_input("Страница", min_value=1, value=1)
-    
-    with col2:
-        size = st.selectbox("Размер страницы", [10, 20, 50, 100])
-    
-    # Получение списка документов
-    try:
-        response = requests.get(
-            f"{API_BASE_URL}/api/v1/documents",
-            params={"page": page, "size": size}
-        )
-        
-        if response.status_code == 200:
-            data = response.json()
-            
-            st.success(f"Всего документов: {data['total']}")
-            
-            # Отображение документов
-            for doc in data['documents']:
-                with st.expander(f"📄 {doc.get('title', 'Без названия')}"):
-                    col1, col2 = st.columns([2, 1])
-                    
-                    with col1:
-                        st.write(f"**ID:** {doc['id']}")
-                        st.write(f"**Путь:** {doc.get('source_path', 'N/A')}")
-                        st.write(f"**Тип:** {doc.get('mime_type', 'N/A')}")
-                        st.write(f"**Чанков:** {doc.get('chunk_count', 0)}")
-                    
-                    with col2:
-                        st.write(f"**Размер:** {doc.get('size_bytes', 'N/A')} байт")
-                        st.write(f"**Загружен:** {doc['created_at']}")
-                        st.write(f"**SHA256:** {doc['sha256'][:16]}...")
-                    
-                    # Кнопки действий
-                    col1, col2, col3 = st.columns(3)
-                    
-                    with col1:
-                        if st.button(f"👁️ Просмотр", key=f"view_{doc['id']}"):
-                            st.info("Функция просмотра в разработке")
-                    
-                    with col2:
-                        if st.button(f"🔍 Чанки", key=f"chunks_{doc['id']}"):
-                            st.info("Функция просмотра чанков в разработке")
-                    
-                    with col3:
-                        if st.button(f"🗑️ Удалить", key=f"delete_{doc['id']}"):
-                            st.info("Функция удаления в разработке")
-            
-            # Пагинация
-            if data['pages'] > 1:
-                st.write(f"Страница {data['page']} из {data['pages']}")
-        
-        else:
-            st.error(f"Ошибка получения документов: {response.status_code}")
-    
-    except Exception as e:
-        st.error(f"Ошибка: {str(e)}")
+    # Проверка аутентификации
+    if not st.session_state.is_authenticated:
+        show_login_page()
+    else:
+        show_main_interface()
 
 
 if __name__ == "__main__":
