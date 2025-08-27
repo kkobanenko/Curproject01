@@ -157,16 +157,27 @@ def get_documents(page: int = 1, size: int = 20, token: str = None) -> Dict[str,
 def get_user_info(token: str) -> Dict[str, Any]:
     """Получение информации о пользователе"""
     try:
+        st.write(f"🔍 Отладка: Запрос к API с токеном: {token[:20]}...")
+        
         headers = {"Authorization": f"Bearer {token}"}
-        response = requests.get(
-            f"{API_BASE_URL}/api/v1/auth/me",
-            headers=headers
-        )
+        st.write(f"📋 Заголовки: {headers}")
+        
+        url = f"{API_BASE_URL}/api/v1/auth/me"
+        st.write(f"🌐 URL: {url}")
+        
+        response = requests.get(url, headers=headers)
+        st.write(f"📡 Статус ответа: {response.status_code}")
+        
         if response.status_code == 200:
-            return response.json()
+            result = response.json()
+            st.write(f"✅ Получен ответ: {result}")
+            return result
         else:
+            error_text = response.text
+            st.write(f"❌ Ошибка API: {error_text}")
             return {"error": f"Ошибка получения данных: {response.status_code}"}
     except Exception as e:
+        st.write(f"💥 Исключение: {str(e)}")
         return {"error": f"Ошибка соединения: {str(e)}"}
 
 
@@ -176,17 +187,30 @@ def show_login_page():
     result = login_form.render()
     
     if result:
+        st.write("🔍 Отладка: Получен результат от формы входа")
+        st.write(f"📋 Результат: {result}")
+        
         # Сохраняем токен и информацию о пользователе
         st.session_state.access_token = result["access_token"]
         st.session_state.is_authenticated = True
         
+        st.write("🔑 Токен сохранен в сессии")
+        st.write(f"🔐 is_authenticated: {st.session_state.is_authenticated}")
+        
         # Получаем информацию о пользователе
+        st.write("👤 Получение информации о пользователе...")
         user_info = get_user_info(result["access_token"])
+        st.write(f"📋 Информация о пользователе: {user_info}")
+        
         if "error" not in user_info:
             st.session_state.user_info = user_info
+            st.write("✅ Информация о пользователе сохранена")
+        else:
+            st.write("❌ Ошибка получения информации о пользователе")
         
         st.success("✅ Вход выполнен успешно!")
-        time.sleep(1)
+        st.write("🔄 Перезапуск страницы...")
+        time.sleep(2)
         st.rerun()
 
 
