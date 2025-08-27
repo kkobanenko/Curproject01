@@ -138,7 +138,7 @@ async def refresh_token(refresh_data: RefreshTokenRequest):
 
 
 @router.get("/me", response_model=User)
-async def get_current_user_info(current_user: UserContext = Depends(get_current_user)):
+async def get_current_user_info(current_user: User = Depends(get_current_user)):
     """
     Получение информации о текущем пользователе
     
@@ -149,15 +149,7 @@ async def get_current_user_info(current_user: UserContext = Depends(get_current_
         Информация о пользователе
     """
     # TODO: Получить полную информацию о пользователе из базы данных
-    return User(
-        id=current_user.user_id,
-        username=current_user.username,
-        email="user@example.com",  # TODO: из базы данных
-        tenant_id=current_user.tenant_id,
-        role_id=current_user.role_id,
-        is_active=True
-        # created_at и last_login будут заполнены автоматически из default_factory
-    )
+    return current_user
 
 
 @router.post("/users", response_model=User)
