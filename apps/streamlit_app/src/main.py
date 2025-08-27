@@ -516,6 +516,12 @@ def show_export_page():
 def main():
     """Основная функция приложения"""
     
+    # Отладочная информация
+    st.write("🔍 Отладка: Состояние сессии")
+    st.write(f"📋 is_authenticated: {st.session_state.get('is_authenticated', False)}")
+    st.write(f"🔑 access_token: {'Есть' if st.session_state.get('access_token') else 'Нет'}")
+    st.write(f"👤 user_info: {'Есть' if st.session_state.get('user_info') else 'Нет'}")
+    
     # Проверка API
     if not check_api_health():
         st.error("❌ API недоступен. Проверьте, что сервис запущен.")
@@ -523,8 +529,10 @@ def main():
     
     # Проверка аутентификации
     if not st.session_state.is_authenticated:
+        st.write("🔐 Показываем страницу входа")
         show_login_page()
     else:
+        st.write("🏠 Показываем основной интерфейс")
         show_main_interface()
 
 
