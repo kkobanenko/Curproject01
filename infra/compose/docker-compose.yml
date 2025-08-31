@@ -1,5 +1,4 @@
-version: "3.9"
-name: ${PROJECT_NAME:-rag-platform}
+version: "3.8"
 
 x-env: &default-env
   TZ: ${TZ:-Europe/Dublin}
@@ -68,19 +67,14 @@ services:
       FLASK_APP: superset
       SUPERSET_DATABASE_URI: postgresql+psycopg2://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@postgres:5432/${PG_SUPERSET_DB:-superset}
       CLICKHOUSE_URI: clickhouse://default@clickhouse:8123/rag
+      SUPERSET_CONFIG_PATH: /app/pythonpath/superset_config.py
+      SUPERSET_HOME: /app/superset_home
     depends_on:
-      postgres:
-        condition: service_healthy
-      clickhouse:
-        condition: service_healthy
+      - postgres
+      - clickhouse
     volumes:
       - superset_home:/app/superset_home
-    entrypoint: ["bash", "-c"]
-    command: |
-      superset db upgrade && \
-      superset fab create-admin --username admin --firstname Admin --lastname User --email admin@example.com --password admin && \
-      superset init && \
-      python /app/superset_bootstrap/init_all.py
+    command: ["python", "/app/superset_bootstrap/init_all.py"]
 
   superset:
     build:
@@ -94,11 +88,12 @@ services:
       SUPERSET_ENV: production
       FLASK_APP: superset
       SUPERSET_DATABASE_URI: postgresql+psycopg2://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@postgres:5432/${PG_SUPERSET_DB:-superset}
+      SUPERSET_CONFIG_PATH: /app/pythonpath/superset_config.py
+      SUPERSET_HOME: /app/superset_home
     ports:
       - "8088:8088"
     depends_on:
-      superset-init:
-        condition: service_completed_successfully
+      - superset-init
     volumes:
       - superset_home:/app/superset_home
     healthcheck:
@@ -130,10 +125,8 @@ services:
       dockerfile: Dockerfile
     container_name: ${PROJECT_NAME:-rag-platform}-airflow-init
     depends_on:
-      postgres:
-        condition: service_healthy
-      redis:
-        condition: service_healthy
+      - postgres
+      - redis
     environment:
       <<: *default-env
       AIRFLOW__CORE__EXECUTOR: ${AIRFLOW_EXECUTOR:-CeleryExecutor}
@@ -155,8 +148,7 @@ services:
     build: { context: ./../../pipelines/airflow, dockerfile: Dockerfile }
     container_name: ${PROJECT_NAME:-rag-platform}-airflow-web
     depends_on:
-      airflow-init:
-        condition: service_completed_successfully
+      - airflow-init
     environment:
       <<: *default-env
       AIRFLOW__CORE__EXECUTOR: ${AIRFLOW_EXECUTOR:-CeleryExecutor}
@@ -180,8 +172,7 @@ services:
     build: { context: ./../../pipelines/airflow, dockerfile: Dockerfile }
     container_name: ${PROJECT_NAME:-rag-platform}-airflow-scheduler
     depends_on:
-      airflow-init:
-        condition: service_completed_successfully
+      - airflow-init
     environment:
       <<: *default-env
       AIRFLOW__CORE__EXECUTOR: ${AIRFLOW_EXECUTOR:-CeleryExecutor}
@@ -199,8 +190,7 @@ services:
     build: { context: ./../../pipelines/airflow, dockerfile: Dockerfile }
     container_name: ${PROJECT_NAME:-rag-platform}-airflow-worker
     depends_on:
-      airflow-init:
-        condition: service_completed_successfully
+      - airflow-init
     environment:
       <<: *default-env
       AIRFLOW__CORE__EXECUTOR: ${AIRFLOW_EXECUTOR:-CeleryExecutor}
@@ -218,8 +208,7 @@ services:
     build: { context: ./../../pipelines/airflow, dockerfile: Dockerfile }
     container_name: ${PROJECT_NAME:-rag-platform}-airflow-triggerer
     depends_on:
-      airflow-init:
-        condition: service_completed_successfully
+      - airflow-init
     environment:
       <<: *default-env
       AIRFLOW__CORE__EXECUTOR: ${AIRFLOW_EXECUTOR:-CeleryExecutor}
@@ -243,10 +232,8 @@ services:
       CLICKHOUSE_URL: http://clickhouse:8123
       CONFIG_PATH: /app/configs/app.toml
     depends_on:
-      postgres:
-        condition: service_healthy
-      ollama:
-        condition: service_healthy
+      - postgres
+      - ollama
     volumes:
       - ./../../configs:/app/configs
       - ./../../packages/rag_core:/app/rag_core
@@ -267,8 +254,7 @@ services:
       <<: *default-env
       API_BASE_URL: http://api:8080
     depends_on:
-      api:
-        condition: service_healthy
+      - api
     ports:
       - "${STREAMLIT_PORT:-8501}:8501"
     healthcheck:

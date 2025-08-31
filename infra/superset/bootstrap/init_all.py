@@ -1,8 +1,10 @@
+#!/usr/bin/env python3
 """
-Главный скрипт инициализации Superset для RAG платформы
+Полная инициализация Superset для RAG платформы (версия 5.0.0)
 """
 import os
 import sys
+import subprocess
 import logging
 import time
 
@@ -10,86 +12,99 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 
+def run_command(command, description):
+    """Выполнение команды с логированием"""
+    logger.info(f"Running: {description}")
+    try:
+        result = subprocess.run(
+            command,
+            shell=True,
+            check=True,
+            capture_output=True,
+            text=True
+        )
+        logger.info(f"Success: {description}")
+        if result.stdout:
+            logger.debug(f"Output: {result.stdout}")
+        return True
+    except subprocess.CalledProcessError as e:
+        logger.error(f"Error in {description}: {e}")
+        if e.stderr:
+            logger.error(f"Stderr: {e.stderr}")
+        return False
+
+
 def wait_for_database():
     """Ожидание готовности базы данных"""
     logger.info("Waiting for database to be ready...")
-    max_retries = 30
-    retry_count = 0
-    
-    while retry_count < max_retries:
+    max_attempts = 30
+    for attempt in range(max_attempts):
         try:
-            # Добавляем путь к Superset
-            sys.path.append('/app')
-            from superset import db
-            
-            # Пробуем подключиться к базе данных
-            db.session.execute('SELECT 1')
-            logger.info("Database is ready!")
-            return True
-            
-        except Exception as e:
-            retry_count += 1
-            logger.info(f"Database not ready yet, retry {retry_count}/{max_retries}: {e}")
-            time.sleep(2)
+            # Проверяем подключение к PostgreSQL
+            result = subprocess.run(
+                "pg_isready -h postgres -p 5432 -U postgres",
+                shell=True,
+                capture_output=True,
+                text=True
+            )
+            if result.returncode == 0:
+                logger.info("Database is ready!")
+                return True
+        except Exception:
+            pass
+        
+        logger.info(f"Database not ready, attempt {attempt + 1}/{max_attempts}")
+        time.sleep(2)
     
-    logger.error("Database is not ready after maximum retries")
+    logger.error("Database is not ready after maximum attempts")
     return False
-
-
-def run_initialization_scripts():
-    """Запуск скриптов инициализации"""
-    scripts = [
-        'init_superset.py',
-        'create_dashboards.py',
-        'setup_user.py'
-    ]
-    
-    for script in scripts:
-        script_path = f'/app/superset_bootstrap/{script}'
-        
-        if not os.path.exists(script_path):
-            logger.error(f"Script {script_path} not found")
-            continue
-        
-        logger.info(f"Running {script}...")
-        
-        try:
-            # Импортируем и запускаем скрипт
-            script_module = script.replace('.py', '')
-            exec(f"import {script_module}")
-            exec(f"success = {script_module}.main()")
-            
-            if success:
-                logger.info(f"{script} completed successfully")
-            else:
-                logger.error(f"{script} failed")
-                return False
-                
-        except Exception as e:
-            logger.error(f"Error running {script}: {e}")
-            return False
-    
-    return True
 
 
 def main():
     """Основная функция инициализации"""
-    logger.info("Starting Superset initialization for RAG platform...")
+    logger.info("Starting complete Superset initialization...")
     
-    # Ждем готовности базы данных
+    # Ожидание готовности базы данных
     if not wait_for_database():
-        logger.error("Failed to connect to database")
         return False
     
-    # Запускаем скрипты инициализации
-    if not run_initialization_scripts():
-        logger.error("Initialization scripts failed")
+    # Обновление схемы базы данных
+    if not run_command("superset db upgrade", "Database schema upgrade"):
+        return False
+    
+    # Создание администратора
+    if not run_command(
+        "superset fab create-admin --username admin --firstname Admin --lastname User --email admin@example.com --password admin",
+        "Create admin user"
+    ):
+        return False
+    
+    # Инициализация Superset
+    if not run_command("superset init", "Superset initialization"):
+        return False
+    
+    # Загрузка примеров (опционально)
+    if os.environ.get('SUPERSET_LOAD_EXAMPLES', 'no').lower() == 'yes':
+        if not run_command("superset load_examples", "Load example data"):
+            return False
+    
+    # Запуск кастомной инициализации
+    logger.info("Running custom initialization...")
+    try:
+        # Импортируем Flask app для создания контекста
+        from superset import create_app
+        app = create_app()
+        
+        with app.app_context():
+            from init_superset import main as custom_init
+            if not custom_init():
+                logger.error("Custom initialization failed")
+                return False
+    except Exception as e:
+        logger.error(f"Error in custom initialization: {e}")
         return False
     
     logger.info("Superset initialization completed successfully!")
-    logger.info("You can now access Superset at http://localhost:8088")
-    logger.info("Login: rag_admin / rag_admin_password")
-    
     return True
 
 

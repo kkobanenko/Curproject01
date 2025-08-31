@@ -15,6 +15,7 @@ from superset.models.dashboard import Dashboard
 from superset.models.slice import Slice
 from superset.models.datasource import Datasource
 from superset.connectors.sqla.models import SqlaTable
+from superset.utils.core import get_example_default_schema
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)

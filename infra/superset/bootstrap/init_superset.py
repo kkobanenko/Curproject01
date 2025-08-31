@@ -1,5 +1,5 @@
 """
-Скрипт инициализации Superset для RAG платформы
+Скрипт инициализации Superset для RAG платформы (версия 5.0.0)
 """
 import os
 import sys
@@ -9,14 +9,6 @@ from datetime import datetime
 # Добавляем путь к Superset
 sys.path.append('/app')
 
-from superset import db
-from superset.models.core import Database
-from superset.models.dashboard import Dashboard
-from superset.models.slice import Slice
-from superset.models.datasource import Datasource
-from superset.connectors.sqla.models import SqlaTable, TableColumn
-from superset.utils.core import get_example_default_schema
-
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
@@ -24,6 +16,10 @@ logger = logging.getLogger(__name__)
 def create_clickhouse_database():
     """Создание подключения к ClickHouse"""
     try:
+        # Импортируем необходимые модули внутри функции
+        from superset import db
+        from superset.models.core import Database
+        
         # Проверяем, существует ли уже подключение
         existing_db = db.session.query(Database).filter_by(
             database_name='ClickHouse RAG Metrics'
@@ -56,15 +52,18 @@ def create_clickhouse_database():
         
     except Exception as e:
         logger.error(f"Error creating ClickHouse database: {e}")
-        db.session.rollback()
         return None
 
 
 def create_datasources(database):
     """Создание источников данных"""
-    datasources = []
-    
     try:
+        # Импортируем необходимые модули внутри функции
+        from superset import db
+        from superset.connectors.sqla.models import SqlaTable
+        
+        datasources = []
+        
         # Таблица метрик системы
         system_metrics_table = SqlaTable(
             table_name='system_metrics',
@@ -163,13 +162,16 @@ def create_datasources(database):
         
     except Exception as e:
         logger.error(f"Error creating datasources: {e}")
-        db.session.rollback()
         return []
 
 
 def create_columns_for_datasources(datasources):
     """Создание колонок для источников данных"""
     try:
+        # Импортируем необходимые модули внутри функции
+        from superset import db
+        from superset.connectors.sqla.models import TableColumn
+        
         # Определяем колонки для каждой таблицы
         table_columns = {
             'system_metrics': [
@@ -251,7 +253,6 @@ def create_columns_for_datasources(datasources):
         
     except Exception as e:
         logger.error(f"Error creating columns: {e}")
-        db.session.rollback()
 
 
 def main():
