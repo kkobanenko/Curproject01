@@ -23,10 +23,28 @@ except ImportError:
     DOCX_AVAILABLE = False
 
 try:
+    import openpyxl
+    OPENPYXL_AVAILABLE = True
+except ImportError:
+    OPENPYXL_AVAILABLE = False
+
+try:
+    from bs4 import BeautifulSoup
+    BS4_AVAILABLE = True
+except ImportError:
+    BS4_AVAILABLE = False
+
+try:
     import xml.etree.ElementTree as ET
     XML_AVAILABLE = True
 except ImportError:
     XML_AVAILABLE = False
+
+try:
+    from PIL import Image
+    PIL_AVAILABLE = True
+except ImportError:
+    PIL_AVAILABLE = False
 
 import re
 
@@ -43,7 +61,16 @@ class DocumentPreview:
             'xlsx': self._preview_xlsx,
             'html': self._preview_html,
             'txt': self._preview_text,
-            'json': self._preview_json
+            'json': self._preview_json,
+            'xml': self._preview_xml,
+            'csv': self._preview_csv,
+            'png': self._preview_image,
+            'jpg': self._preview_image,
+            'jpeg': self._preview_image,
+            'gif': self._preview_image,
+            'bmp': self._preview_image,
+            'tiff': self._preview_image,
+            'webp': self._preview_image
         }
     
     def render(self, document_id: str, document_info: Dict[str, Any]):
@@ -216,29 +243,113 @@ class DocumentPreview:
                 
                 if isinstance(sheet_data, list) and len(sheet_data) > 0:
                     df = pd.DataFrame(sheet_data)
-                    st.dataframe(df, use_container_width=True)
                     
-                    # Статистика листа
-                    col1, col2, col3 = st.columns(3)
+                    # Настройки отображения
+                    col1, col2 = st.columns([3, 1])
+                    
                     with col1:
-                        st.metric("Строк", len(df))
+                        # Основная таблица
+                        st.dataframe(df, use_container_width=True)
+                    
                     with col2:
+                        # Статистика листа
+                        st.metric("Строк", len(df))
                         st.metric("Столбцов", len(df.columns))
-                    with col3:
                         st.metric("Ячеек", len(df) * len(df.columns))
+                        
+                        # Информация о данных
+                        numeric_cols = df.select_dtypes(include=['number']).columns
+                        if len(numeric_cols) > 0:
+                            st.write("**Числовые столбцы:**")
+                            for col in numeric_cols[:5]:  # Показываем первые 5
+                                st.write(f"• {col}")
+                        
+                        # Пропущенные значения
+                        missing_data = df.isnull().sum().sum()
+                        if missing_data > 0:
+                            st.warning(f"Пропущенных значений: {missing_data}")
+                        else:
+                            st.success("✅ Пропущенных значений нет")
+                    
+                    # Дополнительная информация
+                    with st.expander("📈 Анализ данных", expanded=False):
+                        if len(numeric_cols) > 0:
+                            st.write("**Описательная статистика:**")
+                            st.dataframe(df[numeric_cols].describe())
+                        
+                        # Корреляционная матрица для числовых данных
+                        if len(numeric_cols) > 1:
+                            st.write("**Корреляционная матрица:**")
+                            corr_matrix = df[numeric_cols].corr()
+                            st.dataframe(corr_matrix)
                 else:
                     st.info("Лист пуст или содержит некорректные данные")
+        else:
+            st.warning("Не удалось извлечь данные из XLSX файла")
     
     def _preview_html(self, content: Dict[str, Any], document_info: Dict[str, Any]):
         """Предпросмотр HTML документа"""
         st.subheader("🌐 Содержимое HTML")
         
         if content.get('html'):
-            with st.expander("🔍 Исходный HTML", expanded=False):
-                st.code(content['html'], language='html')
-            
+            # Визуализация HTML
             with st.expander("👁️ Визуализация", expanded=True):
                 st.components.v1.html(content['html'], height=600)
+            
+            # Анализ HTML структуры
+            if BS4_AVAILABLE:
+                try:
+                    soup = BeautifulSoup(content['html'], 'html.parser')
+                    
+                    # Статистика HTML
+                    col1, col2, col3, col4 = st.columns(4)
+                    
+                    with col1:
+                        st.metric("Тегов", len(soup.find_all()))
+                    
+                    with col2:
+                        st.metric("Ссылок", len(soup.find_all('a')))
+                    
+                    with col3:
+                        st.metric("Изображений", len(soup.find_all('img')))
+                    
+                    with col4:
+                        st.metric("Таблиц", len(soup.find_all('table')))
+                    
+                    # Извлеченные ссылки
+                    links = soup.find_all('a', href=True)
+                    if links:
+                        with st.expander("🔗 Ссылки", expanded=False):
+                            for i, link in enumerate(links[:10]):  # Показываем первые 10
+                                st.write(f"{i+1}. [{link.get_text().strip()}]({link['href']})")
+                    
+                    # Извлеченные изображения
+                    images = soup.find_all('img', src=True)
+                    if images:
+                        with st.expander("🖼️ Изображения", expanded=False):
+                            for i, img in enumerate(images[:5]):  # Показываем первые 5
+                                st.write(f"{i+1}. {img['src']}")
+                                if img.get('alt'):
+                                    st.caption(f"Alt: {img['alt']}")
+                    
+                    # Таблицы
+                    tables = soup.find_all('table')
+                    if tables:
+                        with st.expander("📊 Таблицы", expanded=False):
+                            for i, table in enumerate(tables):
+                                st.write(f"**Таблица {i+1}:**")
+                                try:
+                                    df = pd.read_html(str(table))[0]
+                                    st.dataframe(df, use_container_width=True)
+                                except:
+                                    st.write("Не удалось преобразовать в таблицу")
+                                
+                except Exception as e:
+                    st.warning(f"Ошибка анализа HTML: {str(e)}")
+            
+            # Исходный HTML код
+            with st.expander("🔍 Исходный HTML", expanded=False):
+                st.code(content['html'], language='html')
         
         if content.get('text'):
             with st.expander("📝 Извлеченный текст", expanded=False):
@@ -358,3 +469,202 @@ class DocumentPreview:
     def _chat_about_document(self, document_id: str, document_info: Dict[str, Any]):
         """Чат по документу"""
         st.info("💬 Функция чата по документу будет доступна в следующем обновлении")
+    
+    def _preview_xml(self, content: Dict[str, Any], document_info: Dict[str, Any]):
+        """Предпросмотр XML документа"""
+        st.subheader("🔧 Содержимое XML")
+        
+        if content.get('xml') or content.get('text'):
+            xml_content = content.get('xml', content.get('text', ''))
+            
+            # Валидация и форматирование XML
+            if XML_AVAILABLE:
+                try:
+                    root = ET.fromstring(xml_content)
+                    
+                    # Статистика XML
+                    col1, col2, col3 = st.columns(3)
+                    
+                    with col1:
+                        st.metric("Элементов", len(root.findall('.//')))
+                    
+                    with col2:
+                        st.metric("Атрибутов", len(root.findall('.//[@*]')))
+                    
+                    with col3:
+                        st.metric("Уровней вложенности", self._get_xml_depth(root))
+                    
+                    # Структура XML
+                    with st.expander("🏗️ Структура XML", expanded=False):
+                        self._display_xml_structure(root)
+                    
+                except ET.ParseError as e:
+                    st.error(f"Ошибка парсинга XML: {str(e)}")
+            
+            # Исходный XML код
+            with st.expander("🔍 Исходный XML", expanded=True):
+                st.code(xml_content, language='xml')
+        else:
+            st.warning("XML содержимое не найдено")
+    
+    def _preview_csv(self, content: Dict[str, Any], document_info: Dict[str, Any]):
+        """Предпросмотр CSV документа"""
+        st.subheader("📊 Содержимое CSV")
+        
+        if content.get('text') or content.get('data'):
+            csv_content = content.get('text', '')
+            
+            if csv_content:
+                try:
+                    # Попытка определить разделитель
+                    import csv as csv_module
+                    from io import StringIO
+                    
+                    # Пробуем разные разделители
+                    separators = [',', ';', '\t', '|']
+                    best_separator = ','
+                    best_score = 0
+                    
+                    for sep in separators:
+                        try:
+                            reader = csv_module.reader(StringIO(csv_content), delimiter=sep)
+                            rows = list(reader)
+                            if len(rows) > 1 and len(rows[0]) > 1:
+                                score = len(rows[0])
+                                if score > best_score:
+                                    best_score = score
+                                    best_separator = sep
+                        except:
+                            continue
+                    
+                    # Читаем CSV с лучшим разделителем
+                    df = pd.read_csv(StringIO(csv_content), sep=best_separator)
+                    
+                    # Отображение данных
+                    col1, col2 = st.columns([3, 1])
+                    
+                    with col1:
+                        st.dataframe(df, use_container_width=True)
+                    
+                    with col2:
+                        st.metric("Строк", len(df))
+                        st.metric("Столбцов", len(df.columns))
+                        st.metric("Разделитель", best_separator)
+                        
+                        # Информация о типах данных
+                        st.write("**Типы данных:**")
+                        for col in df.columns:
+                            dtype = str(df[col].dtype)
+                            st.write(f"• {col}: {dtype}")
+                    
+                    # Анализ данных
+                    with st.expander("📈 Анализ данных", expanded=False):
+                        numeric_cols = df.select_dtypes(include=['number']).columns
+                        if len(numeric_cols) > 0:
+                            st.write("**Описательная статистика:**")
+                            st.dataframe(df[numeric_cols].describe())
+                        
+                        # Пропущенные значения
+                        missing_data = df.isnull().sum()
+                        if missing_data.sum() > 0:
+                            st.write("**Пропущенные значения:**")
+                            st.dataframe(missing_data[missing_data > 0])
+                        else:
+                            st.success("✅ Пропущенных значений нет")
+                    
+                except Exception as e:
+                    st.error(f"Ошибка обработки CSV: {str(e)}")
+                    # Показываем как текст
+                    st.text_area("Содержимое", value=csv_content, height=300, disabled=True)
+            else:
+                st.warning("CSV содержимое не найдено")
+    
+    def _preview_image(self, content: Dict[str, Any], document_info: Dict[str, Any]):
+        """Предпросмотр изображения"""
+        st.subheader("🖼️ Предпросмотр изображения")
+        
+        if content.get('image_data') or content.get('data'):
+            image_data = content.get('image_data', content.get('data', ''))
+            
+            try:
+                if isinstance(image_data, str):
+                    # Base64 декодирование
+                    if image_data.startswith('data:image'):
+                        # Убираем data URL префикс
+                        image_data = image_data.split(',')[1]
+                    
+                    img_bytes = base64.b64decode(image_data)
+                else:
+                    img_bytes = image_data
+                
+                # Отображение изображения
+                st.image(img_bytes, caption=document_info.get('title', 'Изображение'))
+                
+                # Информация об изображении
+                if PIL_AVAILABLE:
+                    try:
+                        img = Image.open(BytesIO(img_bytes))
+                        
+                        col1, col2, col3, col4 = st.columns(4)
+                        
+                        with col1:
+                            st.metric("Ширина", f"{img.width}px")
+                        
+                        with col2:
+                            st.metric("Высота", f"{img.height}px")
+                        
+                        with col3:
+                            st.metric("Формат", img.format)
+                        
+                        with col4:
+                            st.metric("Режим", img.mode)
+                        
+                        # Дополнительная информация
+                        with st.expander("📋 Дополнительная информация", expanded=False):
+                            st.write(f"**Размер файла:** {len(img_bytes)} байт")
+                            st.write(f"**Соотношение сторон:** {img.width/img.height:.2f}")
+                            
+                            if hasattr(img, '_getexif') and img._getexif():
+                                st.write("**EXIF данные:**")
+                                exif = img._getexif()
+                                for tag, value in exif.items():
+                                    st.write(f"• {tag}: {value}")
+                    
+                    except Exception as e:
+                        st.warning(f"Не удалось получить информацию об изображении: {str(e)}")
+                
+            except Exception as e:
+                st.error(f"Ошибка отображения изображения: {str(e)}")
+        else:
+            st.warning("Данные изображения не найдены")
+    
+    def _get_xml_depth(self, element, depth=0):
+        """Получение максимальной глубины XML"""
+        if not element:
+            return depth
+        
+        max_depth = depth
+        for child in element:
+            child_depth = self._get_xml_depth(child, depth + 1)
+            max_depth = max(max_depth, child_depth)
+        
+        return max_depth
+    
+    def _display_xml_structure(self, element, level=0):
+        """Отображение структуры XML"""
+        indent = "  " * level
+        tag_name = element.tag
+        attributes = " ".join([f'{k}="{v}"' for k, v in element.attrib.items()])
+        
+        if attributes:
+            st.write(f"{indent}<{tag_name} {attributes}>")
+        else:
+            st.write(f"{indent}<{tag_name}>")
+        
+        # Показываем только первые несколько уровней
+        if level < 3:
+            for child in element[:5]:  # Показываем только первые 5 детей
+                self._display_xml_structure(child, level + 1)
+        
+        if level == 0 and len(element) > 5:
+            st.write(f"{indent}  ... и еще {len(element) - 5} элементов")

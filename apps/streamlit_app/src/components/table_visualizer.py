@@ -13,7 +13,20 @@ class TableVisualizer:
     """Компонент для визуализации табличных данных"""
     
     def __init__(self):
-        self.chart_types = ['line', 'bar', 'scatter', 'pie', 'histogram', 'box', 'heatmap', 'area']
+        self.chart_types = {
+            'line': '📈 Линейный график',
+            'bar': '📊 Столбчатая диаграмма', 
+            'scatter': '🔵 Точечная диаграмма',
+            'pie': '🥧 Круговая диаграмма',
+            'histogram': '📊 Гистограмма',
+            'box': '📦 Box Plot',
+            'heatmap': '🔥 Тепловая карта',
+            'area': '📈 Областная диаграмма',
+            'violin': '🎻 Скрипичная диаграмма',
+            'density': '🌊 Плотность распределения',
+            'correlation': '🔗 Корреляционная матрица',
+            'trend': '📈 Тренд анализ'
+        }
     
     def render(self, table_data: Dict[str, Any], table_info: Dict[str, Any]):
         """Основной метод рендеринга визуализации таблицы"""
@@ -81,7 +94,8 @@ class TableVisualizer:
         # Выбор типа графика
         chart_type = st.selectbox(
             "Выберите тип графика",
-            self.chart_types,
+            list(self.chart_types.keys()),
+            format_func=lambda x: self.chart_types[x],
             key=f"main_chart_{table_info.get('id', 'default')}"
         )
         
@@ -126,6 +140,28 @@ class TableVisualizer:
                 self._create_heatmap(df)
             else:
                 st.warning("Для тепловой карты нужно минимум 2 числовых столбца")
+        
+        elif chart_type == 'violin':
+            if numeric_columns:
+                column = st.selectbox("Столбец для скрипичной диаграммы", numeric_columns)
+                self._create_violin_plot(df, column)
+        
+        elif chart_type == 'density':
+            if numeric_columns:
+                column = st.selectbox("Столбец для плотности распределения", numeric_columns)
+                self._create_density_plot(df, column)
+        
+        elif chart_type == 'correlation':
+            if len(numeric_columns) > 1:
+                self._create_correlation_matrix(df)
+            else:
+                st.warning("Для корреляционной матрицы нужно минимум 2 числовых столбца")
+        
+        elif chart_type == 'trend':
+            if len(numeric_columns) > 0:
+                self._create_trend_analysis(df, numeric_columns)
+            else:
+                st.warning("Для анализа трендов нужны числовые столбцы")
     
     def _create_simple_chart(self, df: pd.DataFrame, x_col: str, y_col: str, chart_type: str):
         """Создание простых графиков с помощью Streamlit"""
@@ -381,3 +417,193 @@ class TableVisualizer:
                 file_name=f"{table_info.get('title', 'table')}.json",
                 mime="application/json"
             )
+    
+    def _create_violin_plot(self, df: pd.DataFrame, column: str):
+        """Создание скрипичной диаграммы"""
+        st.write(f"**Скрипичная диаграмма для столбца: {column}**")
+        
+        # Статистика
+        stats = df[column].describe()
+        col1, col2, col3, col4 = st.columns(4)
+        
+        with col1:
+            st.metric("Среднее", f"{stats['mean']:.2f}")
+        with col2:
+            st.metric("Медиана", f"{stats['50%']:.2f}")
+        with col3:
+            st.metric("Стандартное отклонение", f"{stats['std']:.2f}")
+        with col4:
+            st.metric("Размах", f"{stats['max'] - stats['min']:.2f}")
+        
+        # Простая визуализация распределения
+        st.write("**Распределение значений:**")
+        st.bar_chart(df[column].value_counts().sort_index())
+        
+        # Квартили
+        Q1 = stats['25%']
+        Q2 = stats['50%']
+        Q3 = stats['75%']
+        IQR = Q3 - Q1
+        
+        st.write("**Квартили:**")
+        st.write(f"• Q1 (25%): {Q1:.2f}")
+        st.write(f"• Q2 (50%): {Q2:.2f}")
+        st.write(f"• Q3 (75%): {Q3:.2f}")
+        st.write(f"• IQR: {IQR:.2f}")
+    
+    def _create_density_plot(self, df: pd.DataFrame, column: str):
+        """Создание графика плотности распределения"""
+        st.write(f"**Плотность распределения для столбца: {column}**")
+        
+        # Статистика
+        data = df[column].dropna()
+        
+        col1, col2, col3 = st.columns(3)
+        
+        with col1:
+            st.metric("Среднее", f"{data.mean():.2f}")
+        with col2:
+            st.metric("Медиана", f"{data.median():.2f}")
+        with col3:
+            st.metric("Мода", f"{data.mode().iloc[0] if not data.mode().empty else 'N/A'}")
+        
+        # Простая гистограмма как приближение плотности
+        st.write("**Гистограмма (приближение плотности):**")
+        st.bar_chart(data.value_counts().sort_index())
+        
+        # Анализ формы распределения
+        skewness = data.skew()
+        kurtosis = data.kurtosis()
+        
+        st.write("**Анализ формы распределения:**")
+        st.write(f"• Асимметрия (skewness): {skewness:.3f}")
+        if abs(skewness) < 0.5:
+            st.write("  → Распределение примерно симметричное")
+        elif skewness > 0.5:
+            st.write("  → Распределение с правосторонней асимметрией")
+        else:
+            st.write("  → Распределение с левосторонней асимметрией")
+        
+        st.write(f"• Эксцесс (kurtosis): {kurtosis:.3f}")
+        if abs(kurtosis) < 0.5:
+            st.write("  → Распределение близко к нормальному")
+        elif kurtosis > 0.5:
+            st.write("  → Распределение с острым пиком")
+        else:
+            st.write("  → Распределение с плоским пиком")
+    
+    def _create_correlation_matrix(self, df: pd.DataFrame):
+        """Создание корреляционной матрицы"""
+        st.write("**Корреляционная матрица**")
+        
+        numeric_df = df.select_dtypes(include=[np.number])
+        corr_matrix = numeric_df.corr()
+        
+        # Отображение матрицы
+        st.dataframe(corr_matrix)
+        
+        # Анализ корреляций
+        st.write("**Анализ корреляций:**")
+        
+        # Сильные корреляции
+        strong_correlations = []
+        moderate_correlations = []
+        weak_correlations = []
+        
+        for i, col1 in enumerate(corr_matrix.columns):
+            for j, col2 in enumerate(corr_matrix.columns):
+                if i < j:  # Показываем только верхний треугольник
+                    corr_value = corr_matrix.loc[col1, col2]
+                    
+                    if abs(corr_value) > 0.7:
+                        strong_correlations.append((col1, col2, corr_value))
+                    elif abs(corr_value) > 0.3:
+                        moderate_correlations.append((col1, col2, corr_value))
+                    else:
+                        weak_correlations.append((col1, col2, corr_value))
+        
+        if strong_correlations:
+            st.write("**Сильные корреляции (|r| > 0.7):**")
+            for col1, col2, corr in strong_correlations:
+                direction = "положительная" if corr > 0 else "отрицательная"
+                st.write(f"• {col1} ↔ {col2}: {corr:.3f} ({direction})")
+        
+        if moderate_correlations:
+            st.write("**Умеренные корреляции (0.3 < |r| ≤ 0.7):**")
+            for col1, col2, corr in moderate_correlations[:5]:  # Показываем первые 5
+                direction = "положительная" if corr > 0 else "отрицательная"
+                st.write(f"• {col1} ↔ {col2}: {corr:.3f} ({direction})")
+        
+        # Рекомендации
+        st.write("**Рекомендации:**")
+        if strong_correlations:
+            st.warning("⚠️ Обнаружены сильные корреляции. Рассмотрите возможность удаления одного из коррелирующих признаков.")
+        else:
+            st.success("✅ Сильных корреляций не обнаружено.")
+    
+    def _create_trend_analysis(self, df: pd.DataFrame, numeric_columns: List[str]):
+        """Анализ трендов"""
+        st.write("**Анализ трендов**")
+        
+        # Выбор столбца для анализа тренда
+        trend_column = st.selectbox("Столбец для анализа тренда", numeric_columns)
+        
+        if trend_column:
+            data = df[trend_column].dropna()
+            
+            if len(data) > 1:
+                # Простой линейный тренд
+                x = np.arange(len(data))
+                y = data.values
+                
+                # Вычисление коэффициента корреляции с временем
+                time_correlation = np.corrcoef(x, y)[0, 1]
+                
+                col1, col2, col3 = st.columns(3)
+                
+                with col1:
+                    st.metric("Корреляция с временем", f"{time_correlation:.3f}")
+                
+                with col2:
+                    if time_correlation > 0.3:
+                        st.success("📈 Восходящий тренд")
+                    elif time_correlation < -0.3:
+                        st.error("📉 Нисходящий тренд")
+                    else:
+                        st.info("➡️ Стабильный тренд")
+                
+                with col3:
+                    # Простое изменение
+                    first_value = data.iloc[0]
+                    last_value = data.iloc[-1]
+                    change = ((last_value - first_value) / first_value) * 100
+                    st.metric("Общее изменение", f"{change:.1f}%")
+                
+                # График тренда
+                st.write("**График тренда:**")
+                chart_data = pd.DataFrame({
+                    'Время': range(len(data)),
+                    'Значение': data.values
+                })
+                st.line_chart(chart_data.set_index('Время'))
+                
+                # Статистика тренда
+                st.write("**Статистика тренда:**")
+                st.write(f"• Начальное значение: {first_value:.2f}")
+                st.write(f"• Конечное значение: {last_value:.2f}")
+                st.write(f"• Минимальное значение: {data.min():.2f}")
+                st.write(f"• Максимальное значение: {data.max():.2f}")
+                st.write(f"• Среднее значение: {data.mean():.2f}")
+                
+                # Волатильность
+                volatility = data.std() / data.mean() * 100
+                st.write(f"• Волатильность: {volatility:.1f}%")
+                
+                if volatility > 20:
+                    st.warning("⚠️ Высокая волатильность")
+                elif volatility > 10:
+                    st.info("ℹ️ Умеренная волатильность")
+                else:
+                    st.success("✅ Низкая волатильность")
+            else:
+                st.warning("Недостаточно данных для анализа тренда")

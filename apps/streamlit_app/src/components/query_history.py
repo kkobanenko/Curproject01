@@ -21,7 +21,10 @@ class QueryHistory:
             'chat': '💬 Чат',
             'upload': '📤 Загрузка',
             'download': '📥 Скачивание',
-            'analysis': '📊 Анализ'
+            'analysis': '📊 Анализ',
+            'preview': '👁️ Предпросмотр',
+            'export': '💾 Экспорт',
+            'settings': '⚙️ Настройки'
         }
     
     def render(self):
@@ -40,6 +43,9 @@ class QueryHistory:
             
             # Отображение истории
             self._render_history_list(history_data, filters)
+            
+            # Быстрый доступ к частым запросам
+            self._render_quick_access(history_data)
             
             # Действия с историей
             self._render_history_actions(history_data)
@@ -165,18 +171,69 @@ class QueryHistory:
             response = requests.get(
                 f"{self.api_base_url}/api/v1/history/queries",
                 params=params,
-                headers=headers
+                headers=headers,
+                timeout=5
             )
             
             if response.status_code == 200:
                 return response.json().get('items', [])
             else:
-                st.error(f"Ошибка получения истории: {response.status_code}")
-                return None
+                st.warning(f"API недоступен (статус: {response.status_code}). Показываем демо-данные.")
+                return self._get_demo_history(filters)
                 
         except Exception as e:
-            st.error(f"Ошибка соединения: {str(e)}")
-            return None
+            st.warning(f"Ошибка соединения с API: {str(e)}. Показываем демо-данные.")
+            return self._get_demo_history(filters)
+    
+    def _get_demo_history(self, filters: Dict[str, Any]) -> List[Dict[str, Any]]:
+        """Создание демо-данных истории для демонстрации"""
+        import random
+        
+        demo_queries = [
+            {
+                'id': f'demo_{i}',
+                'type': random.choice(['search', 'chat', 'upload', 'download', 'analysis']),
+                'query_text': f'Демо запрос {i}: поиск информации о {random.choice(["документах", "таблицах", "анализе", "данных"])}',
+                'timestamp': (datetime.now() - timedelta(hours=random.randint(1, 72))).isoformat(),
+                'status': random.choice(['success', 'success', 'success', 'error']),  # 75% успешных
+                'response_time': round(random.uniform(0.5, 3.0), 2),
+                'results_count': random.randint(0, 25),
+                'user_id': st.session_state.get('user_info', {}).get('id', 'demo_user'),
+                'metadata': {
+                    'ip_address': f'192.168.1.{random.randint(1, 254)}',
+                    'user_agent': 'Mozilla/5.0 (Demo Browser)',
+                    'session_id': f'demo_session_{i}'
+                }
+            }
+            for i in range(1, 21)  # 20 демо записей
+        ]
+        
+        # Фильтрация по типу
+        if filters['types']:
+            demo_queries = [q for q in demo_queries if q['type'] in filters['types']]
+        
+        # Фильтрация по статусу
+        if filters['status']:
+            status_map = {'Успешно': 'success', 'Ошибка': 'error', 'В процессе': 'pending'}
+            status_filter = [status_map.get(s, s) for s in filters['status']]
+            demo_queries = [q for q in demo_queries if q['status'] in status_filter]
+        
+        # Фильтрация по тексту
+        if filters['search_text']:
+            search_text = filters['search_text'].lower()
+            demo_queries = [q for q in demo_queries if search_text in q['query_text'].lower()]
+        
+        # Сортировка
+        if filters['sort_by'] == "По дате (новые)":
+            demo_queries.sort(key=lambda x: x['timestamp'], reverse=True)
+        elif filters['sort_by'] == "По дате (старые)":
+            demo_queries.sort(key=lambda x: x['timestamp'])
+        elif filters['sort_by'] == "По типу":
+            demo_queries.sort(key=lambda x: x['type'])
+        elif filters['sort_by'] == "По статусу":
+            demo_queries.sort(key=lambda x: x['status'])
+        
+        return demo_queries
     
     def _render_statistics(self, history_data: List[Dict[str, Any]]):
         """Отображение статистики по истории"""
@@ -628,3 +685,177 @@ class QueryHistory:
                 st.caption("Бессрочно")
             else:
                 st.caption(f"{retention_days} дней")
+    
+    def _render_quick_access(self, history_data: List[Dict[str, Any]]):
+        """Быстрый доступ к частым запросам"""
+        st.subheader("⚡ Быстрый доступ")
+        
+        if not history_data:
+            return
+        
+        # Анализ частых запросов
+        query_counts = {}
+        successful_queries = [q for q in history_data if q.get('status') == 'success']
+        
+        for query in successful_queries:
+            query_text = query.get('query_text', '')
+            if query_text:
+                # Нормализуем запрос (убираем лишние пробелы, приводим к нижнему регистру)
+                normalized = ' '.join(query_text.lower().split())
+                if len(normalized) > 10:  # Игнорируем слишком короткие запросы
+                    query_counts[normalized] = query_counts.get(normalized, 0) + 1
+        
+        # Сортируем по частоте
+        frequent_queries = sorted(query_counts.items(), key=lambda x: x[1], reverse=True)[:5]
+        
+        if frequent_queries:
+            st.write("**Часто используемые запросы:**")
+            
+            for i, (query, count) in enumerate(frequent_queries):
+                col1, col2, col3 = st.columns([3, 1, 1])
+                
+                with col1:
+                    st.write(f"{i+1}. {query}")
+                
+                with col2:
+                    st.write(f"({count} раз)")
+                
+                with col3:
+                    if st.button("🔄 Повторить", key=f"quick_repeat_{i}"):
+                        self._repeat_quick_query(query)
+        
+        # Быстрые действия
+        st.write("**Быстрые действия:**")
+        
+        col1, col2, col3, col4 = st.columns(4)
+        
+        with col1:
+            if st.button("🔍 Последний поиск", key="quick_last_search"):
+                self._repeat_last_query('search')
+        
+        with col2:
+            if st.button("💬 Последний чат", key="quick_last_chat"):
+                self._repeat_last_query('chat')
+        
+        with col3:
+            if st.button("📊 Анализ активности", key="quick_activity_analysis"):
+                self._show_activity_analysis(history_data)
+        
+        with col4:
+            if st.button("📈 Тренды запросов", key="quick_query_trends"):
+                self._show_query_trends(history_data)
+    
+    def _repeat_quick_query(self, query_text: str):
+        """Повторение быстрого запроса"""
+        # Определяем тип запроса по содержимому
+        if any(word in query_text.lower() for word in ['найди', 'поиск', 'искать', 'найти']):
+            st.session_state['search_query'] = query_text
+            st.switch_page("🔍 Поиск")
+        else:
+            st.session_state['chat_message'] = query_text
+            st.switch_page("💬 Чат")
+    
+    def _repeat_last_query(self, query_type: str):
+        """Повторение последнего запроса определенного типа"""
+        if not hasattr(st.session_state, 'query_history') or not st.session_state.query_history:
+            st.warning("История запросов пуста")
+            return
+        
+        # Ищем последний запрос нужного типа
+        last_query = None
+        for query in reversed(st.session_state.query_history):
+            if query.get('type') == query_type:
+                last_query = query
+                break
+        
+        if last_query:
+            query_text = last_query.get('query_text', '')
+            if query_type == 'search':
+                st.session_state['search_query'] = query_text
+                st.switch_page("🔍 Поиск")
+            elif query_type == 'chat':
+                st.session_state['chat_message'] = query_text
+                st.switch_page("💬 Чат")
+        else:
+            st.warning(f"Не найдено запросов типа '{query_type}'")
+    
+    def _show_activity_analysis(self, history_data: List[Dict[str, Any]]):
+        """Анализ активности пользователя"""
+        st.subheader("📊 Анализ активности")
+        
+        if not history_data:
+            st.warning("Недостаточно данных для анализа")
+            return
+        
+        # Анализ по времени
+        df = pd.DataFrame(history_data)
+        df['timestamp'] = pd.to_datetime(df['timestamp'])
+        df['hour'] = df['timestamp'].dt.hour
+        df['day_of_week'] = df['timestamp'].dt.day_name()
+        df['date'] = df['timestamp'].dt.date
+        
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            # Активность по часам
+            hourly_activity = df.groupby('hour').size()
+            st.write("**Активность по часам:**")
+            st.bar_chart(hourly_activity)
+        
+        with col2:
+            # Активность по дням недели
+            daily_activity = df.groupby('day_of_week').size()
+            st.write("**Активность по дням недели:**")
+            st.bar_chart(daily_activity)
+        
+        # Статистика по типам запросов
+        st.write("**Статистика по типам запросов:**")
+        type_stats = df['type'].value_counts()
+        st.bar_chart(type_stats)
+        
+        # Успешность запросов
+        success_rate = len(df[df['status'] == 'success']) / len(df) * 100
+        st.metric("Успешность запросов", f"{success_rate:.1f}%")
+        
+        # Среднее время ответа
+        avg_response_time = df['response_time'].mean()
+        st.metric("Среднее время ответа", f"{avg_response_time:.2f}с")
+    
+    def _show_query_trends(self, history_data: List[Dict[str, Any]]):
+        """Анализ трендов запросов"""
+        st.subheader("📈 Тренды запросов")
+        
+        if not history_data:
+            st.warning("Недостаточно данных для анализа трендов")
+            return
+        
+        df = pd.DataFrame(history_data)
+        df['timestamp'] = pd.to_datetime(df['timestamp'])
+        df['date'] = df['timestamp'].dt.date
+        
+        # Тренд по дням
+        daily_counts = df.groupby('date').size().reset_index(name='count')
+        st.write("**Количество запросов по дням:**")
+        st.line_chart(daily_counts.set_index('date'))
+        
+        # Тренд по типам запросов
+        st.write("**Тренд по типам запросов:**")
+        type_trends = df.groupby(['date', 'type']).size().unstack(fill_value=0)
+        st.line_chart(type_trends)
+        
+        # Анализ популярных слов
+        all_queries = ' '.join(df['query_text'].fillna('').astype(str))
+        words = all_queries.lower().split()
+        
+        # Убираем стоп-слова
+        stop_words = {'и', 'в', 'на', 'с', 'по', 'для', 'от', 'до', 'из', 'к', 'о', 'у', 'за', 'под', 'над', 'при', 'через', 'между', 'без', 'про', 'что', 'как', 'где', 'когда', 'почему', 'какой', 'какая', 'какое', 'какие'}
+        words = [word for word in words if len(word) > 3 and word not in stop_words]
+        
+        if words:
+            from collections import Counter
+            word_counts = Counter(words)
+            top_words = word_counts.most_common(10)
+            
+            st.write("**Популярные слова в запросах:**")
+            for word, count in top_words:
+                st.write(f"• {word}: {count}")

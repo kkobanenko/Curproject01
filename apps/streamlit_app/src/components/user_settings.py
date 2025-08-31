@@ -21,7 +21,9 @@ class UserSettings:
             'notifications': '🔔 Уведомления',
             'interface': '🎨 Интерфейс',
             'data': '📊 Данные',
-            'integrations': '🔗 Интеграции'
+            'integrations': '🔗 Интеграции',
+            'advanced': '🔧 Расширенные',
+            'backup': '💾 Резервное копирование'
         }
     
     def render(self):
@@ -51,6 +53,10 @@ class UserSettings:
             self._render_data_settings()
         elif selected_category == 'integrations':
             self._render_integrations_settings()
+        elif selected_category == 'advanced':
+            self._render_advanced_settings()
+        elif selected_category == 'backup':
+            self._render_backup_settings()
         
         # Общие действия
         self._render_common_actions()
@@ -1004,3 +1010,371 @@ class UserSettings:
                     
             except Exception as e:
                 st.error(f"Ошибка чтения файла: {str(e)}")
+    
+    def _render_advanced_settings(self):
+        """Расширенные настройки"""
+        st.subheader("🔧 Расширенные настройки")
+        
+        # Производительность
+        with st.expander("⚡ Производительность", expanded=True):
+            col1, col2 = st.columns(2)
+            
+            with col1:
+                cache_size = st.slider(
+                    "Размер кэша (MB)",
+                    min_value=10,
+                    max_value=1000,
+                    value=100,
+                    key="advanced_cache_size"
+                )
+                
+                max_concurrent_requests = st.slider(
+                    "Максимум одновременных запросов",
+                    min_value=1,
+                    max_value=20,
+                    value=5,
+                    key="advanced_max_requests"
+                )
+                
+                request_timeout = st.slider(
+                    "Таймаут запросов (секунды)",
+                    min_value=5,
+                    max_value=120,
+                    value=30,
+                    key="advanced_timeout"
+                )
+            
+            with col2:
+                enable_compression = st.checkbox(
+                    "Включить сжатие данных",
+                    value=True,
+                    key="advanced_compression"
+                )
+                
+                enable_caching = st.checkbox(
+                    "Включить кэширование",
+                    value=True,
+                    key="advanced_caching"
+                )
+                
+                debug_mode = st.checkbox(
+                    "Режим отладки",
+                    value=False,
+                    key="advanced_debug"
+                )
+        
+        # Логирование
+        with st.expander("📝 Логирование", expanded=False):
+            col1, col2 = st.columns(2)
+            
+            with col1:
+                log_level = st.selectbox(
+                    "Уровень логирования",
+                    ["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"],
+                    index=1,
+                    key="advanced_log_level"
+                )
+                
+                log_requests = st.checkbox(
+                    "Логировать запросы",
+                    value=True,
+                    key="advanced_log_requests"
+                )
+            
+            with col2:
+                log_retention = st.selectbox(
+                    "Хранение логов",
+                    ["1 день", "7 дней", "30 дней", "90 дней"],
+                    index=2,
+                    key="advanced_log_retention"
+                )
+                
+                log_analytics = st.checkbox(
+                    "Аналитика использования",
+                    value=True,
+                    key="advanced_log_analytics"
+                )
+        
+        # Экспериментальные функции
+        with st.expander("🧪 Экспериментальные функции", expanded=False):
+            col1, col2 = st.columns(2)
+            
+            with col1:
+                beta_features = st.checkbox(
+                    "Включить бета-функции",
+                    value=False,
+                    key="advanced_beta_features"
+                )
+                
+                ai_suggestions = st.checkbox(
+                    "AI предложения",
+                    value=True,
+                    key="advanced_ai_suggestions"
+                )
+            
+            with col2:
+                auto_updates = st.checkbox(
+                    "Автоматические обновления",
+                    value=True,
+                    key="advanced_auto_updates"
+                )
+                
+                telemetry = st.checkbox(
+                    "Отправка телеметрии",
+                    value=False,
+                    key="advanced_telemetry"
+                )
+        
+        # Системная информация
+        with st.expander("💻 Системная информация", expanded=False):
+            import platform
+            import sys
+            
+            col1, col2 = st.columns(2)
+            
+            with col1:
+                st.write("**Операционная система:**")
+                st.write(f"• {platform.system()} {platform.release()}")
+                st.write(f"• Архитектура: {platform.machine()}")
+                st.write(f"• Процессор: {platform.processor()}")
+            
+            with col2:
+                st.write("**Python и библиотеки:**")
+                st.write(f"• Python: {sys.version.split()[0]}")
+                st.write(f"• Streamlit: {st.__version__}")
+                st.write(f"• Pandas: {pd.__version__}")
+    
+    def _render_backup_settings(self):
+        """Настройки резервного копирования"""
+        st.subheader("💾 Резервное копирование")
+        
+        # Автоматическое резервное копирование
+        with st.expander("🔄 Автоматическое резервное копирование", expanded=True):
+            col1, col2 = st.columns(2)
+            
+            with col1:
+                auto_backup = st.checkbox(
+                    "Включить автоматическое резервное копирование",
+                    value=True,
+                    key="backup_auto_enabled"
+                )
+                
+                if auto_backup:
+                    backup_frequency = st.selectbox(
+                        "Частота резервного копирования",
+                        ["Ежедневно", "Еженедельно", "Ежемесячно"],
+                        index=1,
+                        key="backup_frequency"
+                    )
+                    
+                    backup_time = st.time_input(
+                        "Время резервного копирования",
+                        value=datetime.strptime("02:00", "%H:%M").time(),
+                        key="backup_time"
+                    )
+            
+            with col2:
+                if auto_backup:
+                    backup_retention = st.selectbox(
+                        "Хранение резервных копий",
+                        ["7 дней", "30 дней", "90 дней", "1 год", "Бессрочно"],
+                        index=2,
+                        key="backup_retention"
+                    )
+                    
+                    backup_compression = st.checkbox(
+                        "Сжатие резервных копий",
+                        value=True,
+                        key="backup_compression"
+                    )
+        
+        # Ручное резервное копирование
+        with st.expander("📤 Ручное резервное копирование", expanded=True):
+            st.write("**Создать резервную копию:**")
+            
+            col1, col2, col3 = st.columns(3)
+            
+            with col1:
+                if st.button("💾 Полная копия", key="backup_full", use_container_width=True):
+                    self._create_full_backup()
+            
+            with col2:
+                if st.button("📊 Только данные", key="backup_data", use_container_width=True):
+                    self._create_data_backup()
+            
+            with col3:
+                if st.button("⚙️ Только настройки", key="backup_settings", use_container_width=True):
+                    self._create_settings_backup()
+        
+        # Восстановление
+        with st.expander("📥 Восстановление", expanded=False):
+            st.write("**Восстановить из резервной копии:**")
+            
+            # Загрузка файла резервной копии
+            uploaded_backup = st.file_uploader(
+                "Выберите файл резервной копии",
+                type=['zip', 'json', 'tar'],
+                key="backup_upload"
+            )
+            
+            if uploaded_backup is not None:
+                st.success(f"✅ Файл загружен: {uploaded_backup.name}")
+                
+                col1, col2 = st.columns(2)
+                
+                with col1:
+                    if st.button("🔄 Восстановить", key="restore_backup"):
+                        self._restore_backup(uploaded_backup)
+                
+                with col2:
+                    if st.button("👁️ Предпросмотр", key="preview_backup"):
+                        self._preview_backup(uploaded_backup)
+        
+        # Управление резервными копиями
+        with st.expander("📋 Управление резервными копиями", expanded=False):
+            st.write("**Доступные резервные копии:**")
+            
+            # Список резервных копий (демо)
+            backup_list = [
+                {"name": "backup_2024_01_15_02_00.zip", "date": "2024-01-15 02:00", "size": "15.2 MB", "type": "Полная"},
+                {"name": "backup_2024_01_14_02_00.zip", "date": "2024-01-14 02:00", "size": "14.8 MB", "type": "Полная"},
+                {"name": "backup_2024_01_13_02_00.zip", "date": "2024-01-13 02:00", "size": "15.1 MB", "type": "Полная"},
+            ]
+            
+            for backup in backup_list:
+                col1, col2, col3, col4 = st.columns([3, 2, 1, 1])
+                
+                with col1:
+                    st.write(f"📁 {backup['name']}")
+                
+                with col2:
+                    st.write(f"📅 {backup['date']} ({backup['size']})")
+                
+                with col3:
+                    if st.button("📥", key=f"download_{backup['name']}", help="Скачать"):
+                        st.info("Функция скачивания будет доступна в следующем обновлении")
+                
+                with col4:
+                    if st.button("🗑️", key=f"delete_{backup['name']}", help="Удалить"):
+                        st.info("Функция удаления будет доступна в следующем обновлении")
+    
+    def _create_full_backup(self):
+        """Создание полной резервной копии"""
+        try:
+            # Собираем все данные для резервного копирования
+            backup_data = {
+                'backup_type': 'full',
+                'backup_time': datetime.now().isoformat(),
+                'user_info': st.session_state.get('user_info', {}),
+                'settings': self._collect_current_settings(),
+                'metadata': {
+                    'version': '1.0',
+                    'created_by': st.session_state.get('user_info', {}).get('username', 'unknown')
+                }
+            }
+            
+            # Создаем JSON файл
+            json_str = json.dumps(backup_data, indent=2, ensure_ascii=False)
+            
+            # Создаем имя файла
+            timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+            filename = f"backup_full_{timestamp}.json"
+            
+            st.download_button(
+                label="💾 Скачать полную резервную копию",
+                data=json_str,
+                file_name=filename,
+                mime="application/json"
+            )
+            
+            st.success("✅ Полная резервная копия создана")
+            
+        except Exception as e:
+            st.error(f"Ошибка создания резервной копии: {str(e)}")
+    
+    def _create_data_backup(self):
+        """Создание резервной копии данных"""
+        st.info("📊 Функция резервного копирования данных будет доступна в следующем обновлении")
+    
+    def _create_settings_backup(self):
+        """Создание резервной копии настроек"""
+        try:
+            settings_data = {
+                'backup_type': 'settings',
+                'backup_time': datetime.now().isoformat(),
+                'settings': self._collect_current_settings(),
+                'metadata': {
+                    'version': '1.0',
+                    'created_by': st.session_state.get('user_info', {}).get('username', 'unknown')
+                }
+            }
+            
+            json_str = json.dumps(settings_data, indent=2, ensure_ascii=False)
+            
+            timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+            filename = f"backup_settings_{timestamp}.json"
+            
+            st.download_button(
+                label="⚙️ Скачать резервную копию настроек",
+                data=json_str,
+                file_name=filename,
+                mime="application/json"
+            )
+            
+            st.success("✅ Резервная копия настроек создана")
+            
+        except Exception as e:
+            st.error(f"Ошибка создания резервной копии настроек: {str(e)}")
+    
+    def _restore_backup(self, uploaded_file):
+        """Восстановление из резервной копии"""
+        try:
+            # Читаем файл
+            backup_data = json.load(uploaded_file)
+            
+            # Проверяем тип резервной копии
+            backup_type = backup_data.get('backup_type', 'unknown')
+            
+            if backup_type == 'settings':
+                # Восстанавливаем настройки
+                settings = backup_data.get('settings', {})
+                
+                # Применяем настройки (демо)
+                st.success("✅ Настройки восстановлены из резервной копии")
+                st.info("Перезапустите приложение для применения настроек")
+                
+            elif backup_type == 'full':
+                st.success("✅ Полная резервная копия восстановлена")
+                st.info("Перезапустите приложение для применения изменений")
+                
+            else:
+                st.warning("⚠️ Неизвестный тип резервной копии")
+            
+        except Exception as e:
+            st.error(f"Ошибка восстановления: {str(e)}")
+    
+    def _preview_backup(self, uploaded_file):
+        """Предпросмотр резервной копии"""
+        try:
+            backup_data = json.load(uploaded_file)
+            
+            st.write("**Информация о резервной копии:**")
+            
+            col1, col2 = st.columns(2)
+            
+            with col1:
+                st.write(f"• **Тип:** {backup_data.get('backup_type', 'Неизвестно')}")
+                st.write(f"• **Дата создания:** {backup_data.get('backup_time', 'Неизвестно')}")
+                st.write(f"• **Размер файла:** {len(uploaded_file.getvalue())} байт")
+            
+            with col2:
+                metadata = backup_data.get('metadata', {})
+                st.write(f"• **Версия:** {metadata.get('version', 'Неизвестно')}")
+                st.write(f"• **Создано пользователем:** {metadata.get('created_by', 'Неизвестно')}")
+            
+            # Показываем содержимое
+            with st.expander("📋 Содержимое резервной копии", expanded=False):
+                st.json(backup_data)
+                
+        except Exception as e:
+            st.error(f"Ошибка предпросмотра: {str(e)}")

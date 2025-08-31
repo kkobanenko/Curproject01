@@ -19,14 +19,18 @@ class ExportManager:
     
     def __init__(self):
         self.export_formats = {
-            'csv': {'name': 'CSV', 'mime': 'text/csv', 'extension': '.csv'},
-            'excel': {'name': 'Excel', 'mime': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', 'extension': '.xlsx'},
-            'json': {'name': 'JSON', 'mime': 'application/json', 'extension': '.json'},
-            'txt': {'name': 'Текст', 'mime': 'text/plain', 'extension': '.txt'},
-            'pdf': {'name': 'PDF', 'mime': 'application/pdf', 'extension': '.pdf'},
-            'html': {'name': 'HTML', 'mime': 'text/html', 'extension': '.html'},
-            'xml': {'name': 'XML', 'mime': 'application/xml', 'extension': '.xml'},
-            'zip': {'name': 'ZIP архив', 'mime': 'application/zip', 'extension': '.zip'}
+            'csv': {'name': 'CSV', 'mime': 'text/csv', 'extension': '.csv', 'category': 'Табличные'},
+            'excel': {'name': 'Excel', 'mime': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', 'extension': '.xlsx', 'category': 'Табличные'},
+            'json': {'name': 'JSON', 'mime': 'application/json', 'extension': '.json', 'category': 'Структурированные'},
+            'xml': {'name': 'XML', 'mime': 'application/xml', 'extension': '.xml', 'category': 'Структурированные'},
+            'yaml': {'name': 'YAML', 'mime': 'text/yaml', 'extension': '.yaml', 'category': 'Структурированные'},
+            'txt': {'name': 'Текст', 'mime': 'text/plain', 'extension': '.txt', 'category': 'Текстовые'},
+            'html': {'name': 'HTML', 'mime': 'text/html', 'extension': '.html', 'category': 'Текстовые'},
+            'markdown': {'name': 'Markdown', 'mime': 'text/markdown', 'extension': '.md', 'category': 'Текстовые'},
+            'pdf': {'name': 'PDF', 'mime': 'application/pdf', 'extension': '.pdf', 'category': 'Документы'},
+            'zip': {'name': 'ZIP архив', 'mime': 'application/zip', 'extension': '.zip', 'category': 'Архивы'},
+            'tar': {'name': 'TAR архив', 'mime': 'application/x-tar', 'extension': '.tar', 'category': 'Архивы'},
+            'sql': {'name': 'SQL', 'mime': 'application/sql', 'extension': '.sql', 'category': 'Специальные'}
         }
     
     def render(self, data: Any, data_type: str, title: str = "Экспорт данных"):
@@ -111,13 +115,12 @@ class ExportManager:
         st.subheader("📁 Выбор формата экспорта")
         
         # Группировка форматов по категориям
-        format_categories = {
-            'Табличные': ['csv', 'excel'],
-            'Структурированные': ['json', 'xml'],
-            'Текстовые': ['txt', 'html'],
-            'Документы': ['pdf'],
-            'Архивы': ['zip']
-        }
+        format_categories = {}
+        for fmt_key, fmt_info in self.export_formats.items():
+            category = fmt_info['category']
+            if category not in format_categories:
+                format_categories[category] = []
+            format_categories[category].append(fmt_key)
         
         selected_format = None
         
@@ -167,6 +170,14 @@ class ExportManager:
             options.update(self._get_xml_options())
         elif export_format == 'zip':
             options.update(self._get_zip_options())
+        elif export_format == 'yaml':
+            options.update(self._get_yaml_options())
+        elif export_format == 'markdown':
+            options.update(self._get_markdown_options())
+        elif export_format == 'tar':
+            options.update(self._get_tar_options())
+        elif export_format == 'sql':
+            options.update(self._get_sql_options())
         
         # Общие опции
         options.update(self._get_common_options())
@@ -578,6 +589,18 @@ class ExportManager:
             elif export_format == 'zip':
                 return self._create_zip_archive(data, options)
             
+            elif export_format == 'yaml':
+                return self._create_yaml_export(data, options)
+            
+            elif export_format == 'markdown':
+                return self._create_markdown_export(data, options)
+            
+            elif export_format == 'tar':
+                return self._create_tar_archive(data, options)
+            
+            elif export_format == 'sql':
+                return self._create_sql_export(data, options)
+            
             return None
             
         except Exception as e:
@@ -698,3 +721,320 @@ class ExportManager:
             st.selectbox("Формат по умолчанию", list(self.export_formats.keys()), 
                         format_func=lambda x: self.export_formats[x]['name'])
             st.text_input("Папка назначения", key="export_folder")
+    
+    def _get_yaml_options(self) -> Dict[str, Any]:
+        """Опции для YAML экспорта"""
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            indent = st.slider("Отступ", 2, 8, 2, key="yaml_indent")
+            default_flow_style = st.checkbox("Использовать flow style", value=False, key="yaml_flow")
+        
+        with col2:
+            allow_unicode = st.checkbox("Разрешить Unicode", value=True, key="yaml_unicode")
+            sort_keys = st.checkbox("Сортировать ключи", value=False, key="yaml_sort")
+        
+        return {
+            'indent': indent,
+            'default_flow_style': default_flow_style,
+            'allow_unicode': allow_unicode,
+            'sort_keys': sort_keys
+        }
+    
+    def _get_markdown_options(self) -> Dict[str, Any]:
+        """Опции для Markdown экспорта"""
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            include_metadata = st.checkbox("Включить метаданные", value=True, key="md_metadata")
+            table_format = st.selectbox("Формат таблиц", ["GitHub", "Grid", "Simple"], key="md_table_format")
+        
+        with col2:
+            include_toc = st.checkbox("Включить оглавление", value=False, key="md_toc")
+            header_level = st.selectbox("Уровень заголовков", [1, 2, 3, 4, 5, 6], index=1, key="md_header_level")
+        
+        return {
+            'include_metadata': include_metadata,
+            'table_format': table_format,
+            'include_toc': include_toc,
+            'header_level': header_level
+        }
+    
+    def _get_tar_options(self) -> Dict[str, Any]:
+        """Опции для TAR экспорта"""
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            compression = st.selectbox("Сжатие", ["Нет", "Gzip", "Bzip2"], key="tar_compression")
+            include_metadata = st.checkbox("Включить метаданные", value=True, key="tar_metadata")
+        
+        with col2:
+            comment = st.text_input("Комментарий к архиву", key="tar_comment")
+            preserve_permissions = st.checkbox("Сохранить права доступа", value=False, key="tar_permissions")
+        
+        return {
+            'compression': compression,
+            'include_metadata': include_metadata,
+            'comment': comment,
+            'preserve_permissions': preserve_permissions
+        }
+    
+    def _get_sql_options(self) -> Dict[str, Any]:
+        """Опции для SQL экспорта"""
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            table_name = st.text_input("Имя таблицы", value="exported_data", key="sql_table_name")
+            include_create = st.checkbox("Включить CREATE TABLE", value=True, key="sql_create")
+        
+        with col2:
+            include_drop = st.checkbox("Включить DROP TABLE", value=False, key="sql_drop")
+            batch_size = st.number_input("Размер пакета", min_value=1, max_value=1000, value=100, key="sql_batch_size")
+        
+        return {
+            'table_name': table_name,
+            'include_create': include_create,
+            'include_drop': include_drop,
+            'batch_size': batch_size
+        }
+    
+    def _create_yaml_export(self, data: Any, options: Dict[str, Any]) -> str:
+        """Создание YAML экспорта"""
+        try:
+            import yaml
+            
+            if isinstance(data, list):
+                yaml_data = data
+            elif isinstance(data, dict):
+                yaml_data = data
+            elif isinstance(data, pd.DataFrame):
+                yaml_data = data.to_dict('records')
+            else:
+                yaml_data = {'data': data}
+            
+            return yaml.dump(
+                yaml_data,
+                default_flow_style=options.get('default_flow_style', False),
+                allow_unicode=options.get('allow_unicode', True),
+                sort_keys=options.get('sort_keys', False),
+                indent=options.get('indent', 2)
+            )
+        except ImportError:
+            st.error("Для экспорта в YAML установите PyYAML: `pip install PyYAML`")
+            return None
+        except Exception as e:
+            st.error(f"Ошибка создания YAML: {str(e)}")
+            return None
+    
+    def _create_markdown_export(self, data: Any, options: Dict[str, Any]) -> str:
+        """Создание Markdown экспорта"""
+        try:
+            md_content = []
+            
+            # Заголовок
+            header_level = options.get('header_level', 2)
+            md_content.append(f"{'#' * header_level} Экспорт данных")
+            md_content.append("")
+            
+            # Метаданные
+            if options.get('include_metadata', True):
+                md_content.append("## Метаданные")
+                md_content.append(f"- **Дата экспорта:** {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+                md_content.append(f"- **Тип данных:** {type(data).__name__}")
+                if isinstance(data, (list, dict)):
+                    md_content.append(f"- **Количество элементов:** {len(data)}")
+                md_content.append("")
+            
+            # Оглавление
+            if options.get('include_toc', False):
+                md_content.append("## Оглавление")
+                md_content.append("- [Данные](#данные)")
+                md_content.append("")
+            
+            # Основные данные
+            md_content.append("## Данные")
+            md_content.append("")
+            
+            if isinstance(data, pd.DataFrame):
+                # Таблица в Markdown
+                table_format = options.get('table_format', 'GitHub')
+                if table_format == 'GitHub':
+                    md_content.append(data.to_markdown(index=False))
+                else:
+                    # Простая таблица
+                    md_content.append("| " + " | ".join(data.columns) + " |")
+                    md_content.append("| " + " | ".join(["---"] * len(data.columns)) + " |")
+                    for _, row in data.iterrows():
+                        md_content.append("| " + " | ".join(str(cell) for cell in row) + " |")
+            
+            elif isinstance(data, list):
+                for i, item in enumerate(data):
+                    md_content.append(f"### Элемент {i+1}")
+                    if isinstance(item, dict):
+                        for key, value in item.items():
+                            md_content.append(f"- **{key}:** {value}")
+                    else:
+                        md_content.append(f"{item}")
+                    md_content.append("")
+            
+            elif isinstance(data, dict):
+                for key, value in data.items():
+                    md_content.append(f"### {key}")
+                    if isinstance(value, (list, dict)):
+                        md_content.append(f"```json\n{json.dumps(value, indent=2, ensure_ascii=False)}\n```")
+                    else:
+                        md_content.append(f"{value}")
+                    md_content.append("")
+            
+            else:
+                md_content.append(f"```\n{str(data)}\n```")
+            
+            return "\n".join(md_content)
+            
+        except Exception as e:
+            st.error(f"Ошибка создания Markdown: {str(e)}")
+            return None
+    
+    def _create_tar_archive(self, data: Any, options: Dict[str, Any]) -> bytes:
+        """Создание TAR архива"""
+        try:
+            import tarfile
+            
+            buffer = BytesIO()
+            
+            # Определяем режим сжатия
+            compression = options.get('compression', 'Нет')
+            if compression == 'Gzip':
+                mode = 'w:gz'
+            elif compression == 'Bzip2':
+                mode = 'w:bz2'
+            else:
+                mode = 'w'
+            
+            with tarfile.open(fileobj=buffer, mode=mode) as tar:
+                # Добавляем основные данные
+                if isinstance(data, list):
+                    # Экспортируем в несколько форматов
+                    formats_to_include = ['csv', 'json', 'txt']
+                    
+                    for fmt in formats_to_include:
+                        try:
+                            if fmt == 'csv':
+                                df = pd.DataFrame(data)
+                                csv_data = df.to_csv(index=False)
+                                tarinfo = tarfile.TarInfo(name=f"data.{fmt}")
+                                tarinfo.size = len(csv_data.encode('utf-8'))
+                                tar.addfile(tarinfo, BytesIO(csv_data.encode('utf-8')))
+                            elif fmt == 'json':
+                                json_data = json.dumps(data, indent=2, ensure_ascii=False)
+                                tarinfo = tarfile.TarInfo(name=f"data.{fmt}")
+                                tarinfo.size = len(json_data.encode('utf-8'))
+                                tar.addfile(tarinfo, BytesIO(json_data.encode('utf-8')))
+                            elif fmt == 'txt':
+                                txt_data = '\n'.join([str(item) for item in data])
+                                tarinfo = tarfile.TarInfo(name=f"data.{fmt}")
+                                tarinfo.size = len(txt_data.encode('utf-8'))
+                                tar.addfile(tarinfo, BytesIO(txt_data.encode('utf-8')))
+                        except:
+                            continue
+                
+                # Добавляем метаданные
+                if options.get('include_metadata', True):
+                    metadata = {
+                        'export_time': datetime.now().isoformat(),
+                        'data_type': type(data).__name__,
+                        'data_size': len(data) if isinstance(data, (list, dict)) else 1,
+                        'export_options': options
+                    }
+                    
+                    metadata_json = json.dumps(metadata, indent=2, ensure_ascii=False)
+                    tarinfo = tarfile.TarInfo(name="metadata.json")
+                    tarinfo.size = len(metadata_json.encode('utf-8'))
+                    tar.addfile(tarinfo, BytesIO(metadata_json.encode('utf-8')))
+            
+            return buffer.getvalue()
+            
+        except Exception as e:
+            st.error(f"Ошибка создания TAR архива: {str(e)}")
+            return None
+    
+    def _create_sql_export(self, data: Any, options: Dict[str, Any]) -> str:
+        """Создание SQL экспорта"""
+        try:
+            sql_content = []
+            
+            table_name = options.get('table_name', 'exported_data')
+            include_drop = options.get('include_drop', False)
+            include_create = options.get('include_create', True)
+            batch_size = options.get('batch_size', 100)
+            
+            # DROP TABLE
+            if include_drop:
+                sql_content.append(f"DROP TABLE IF EXISTS `{table_name}`;")
+                sql_content.append("")
+            
+            if isinstance(data, pd.DataFrame):
+                # CREATE TABLE
+                if include_create:
+                    sql_content.append(f"CREATE TABLE `{table_name}` (")
+                    
+                    columns = []
+                    for col in data.columns:
+                        # Определяем тип столбца
+                        dtype = str(data[col].dtype)
+                        if 'int' in dtype:
+                            sql_type = 'INT'
+                        elif 'float' in dtype:
+                            sql_type = 'FLOAT'
+                        elif 'bool' in dtype:
+                            sql_type = 'BOOLEAN'
+                        else:
+                            sql_type = 'TEXT'
+                        
+                        columns.append(f"  `{col}` {sql_type}")
+                    
+                    sql_content.append(",\n".join(columns))
+                    sql_content.append(");")
+                    sql_content.append("")
+                
+                # INSERT statements
+                for i in range(0, len(data), batch_size):
+                    batch = data.iloc[i:i+batch_size]
+                    
+                    sql_content.append(f"INSERT INTO `{table_name}` VALUES")
+                    
+                    values = []
+                    for _, row in batch.iterrows():
+                        row_values = []
+                        for value in row:
+                            if pd.isna(value):
+                                row_values.append('NULL')
+                            elif isinstance(value, str):
+                                # Экранируем кавычки
+                                escaped_value = value.replace("'", "''")
+                                row_values.append(f"'{escaped_value}'")
+                            else:
+                                row_values.append(str(value))
+                        
+                        values.append(f"({', '.join(row_values)})")
+                    
+                    sql_content.append(",\n".join(values) + ";")
+                    sql_content.append("")
+            
+            elif isinstance(data, list):
+                # Простой экспорт списка
+                sql_content.append(f"CREATE TABLE `{table_name}` (")
+                sql_content.append("  `id` INT AUTO_INCREMENT PRIMARY KEY,")
+                sql_content.append("  `value` TEXT")
+                sql_content.append(");")
+                sql_content.append("")
+                
+                for i, item in enumerate(data):
+                    escaped_value = str(item).replace("'", "''")
+                    sql_content.append(f"INSERT INTO `{table_name}` (`value`) VALUES ('{escaped_value}');")
+            
+            return "\n".join(sql_content)
+            
+        except Exception as e:
+            st.error(f"Ошибка создания SQL: {str(e)}")
+            return None
