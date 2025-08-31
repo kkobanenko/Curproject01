@@ -28,3 +28,8 @@ redis==5.0.1
 
 # Валидация email
 email-validator==2.1.0
+
+# Мониторинг и метрики
+clickhouse-connect==0.6.23
+psutil==5.9.6
+aiohttp==3.9.1

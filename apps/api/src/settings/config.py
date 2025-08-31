@@ -44,6 +44,23 @@ class Settings(BaseSettings):
     
     # ClickHouse настройки
     clickhouse_url: str = Field(default="http://localhost:8123", env="CLICKHOUSE_URL")
+    clickhouse_host: str = Field(default="localhost", env="CLICKHOUSE_HOST")
+    clickhouse_port: int = Field(default=8123, env="CLICKHOUSE_PORT")
+    clickhouse_user: str = Field(default="default", env="CLICKHOUSE_USER")
+    clickhouse_password: str = Field(default="", env="CLICKHOUSE_PASSWORD")
+    clickhouse_database: str = Field(default="rag", env="CLICKHOUSE_DATABASE")
+    
+    # Email настройки для алертов
+    smtp_server: str = Field(default="localhost", env="SMTP_SERVER")
+    smtp_port: int = Field(default=587, env="SMTP_PORT")
+    smtp_username: str = Field(default="", env="SMTP_USERNAME")
+    smtp_password: str = Field(default="", env="SMTP_PASSWORD")
+    smtp_from_email: str = Field(default="alerts@rag-system.com", env="SMTP_FROM_EMAIL")
+    alert_emails: str = Field(default="admin@rag-system.com", env="ALERT_EMAILS")
+    
+    # Slack настройки для алертов
+    slack_webhook_url: str = Field(default="", env="SLACK_WEBHOOK_URL")
+    slack_channel: str = Field(default="#alerts", env="SLACK_CHANNEL")
     
     # Путь к конфигурации
     config_path: str = Field(default="/app/configs/app.toml", env="CONFIG_PATH")
