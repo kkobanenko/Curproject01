@@ -21,7 +21,7 @@ COPY src/ ./src/
 RUN mkdir -p uploads
 
 # Открытие порта
-EXPOSE 8080
+EXPOSE 8081
 
 # Команда запуска
-CMD ["uvicorn", "src.main:app", "--host", "0.0.0.0", "--port", "8080"]
+CMD ["uvicorn", "src.main:app", "--host", "0.0.0.0", "--port", "8081"]
