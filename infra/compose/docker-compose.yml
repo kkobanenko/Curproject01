@@ -55,6 +55,33 @@ services:
       timeout: 5s
       retries: 5
 
+  superset-init:
+    build:
+      context: ./../superset
+      dockerfile: Dockerfile
+    container_name: ${PROJECT_NAME:-rag-platform}-superset-init
+    environment:
+      <<: *default-env
+      SUPERSET_SECRET_KEY: ${SUPERSET_SECRET_KEY:-CHANGE_ME_SUPERSET_SECRET}
+      SUPERSET_LOAD_EXAMPLES: "no"
+      SUPERSET_ENV: production
+      FLASK_APP: superset
+      SUPERSET_DATABASE_URI: postgresql+psycopg2://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@postgres:5432/${PG_SUPERSET_DB:-superset}
+      CLICKHOUSE_URI: clickhouse://default@clickhouse:8123/rag
+    depends_on:
+      postgres:
+        condition: service_healthy
+      clickhouse:
+        condition: service_healthy
+    volumes:
+      - superset_home:/app/superset_home
+    entrypoint: ["bash", "-c"]
+    command: |
+      superset db upgrade && \
+      superset fab create-admin --username admin --firstname Admin --lastname User --email admin@example.com --password admin && \
+      superset init && \
+      python /app/superset_bootstrap/init_all.py
+
   superset:
     build:
       context: ./../superset
@@ -70,8 +97,8 @@ services:
     ports:
       - "8088:8088"
     depends_on:
-      postgres:
-        condition: service_healthy
+      superset-init:
+        condition: service_completed_successfully
     volumes:
       - superset_home:/app/superset_home
     healthcheck:
