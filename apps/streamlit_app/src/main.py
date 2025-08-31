@@ -22,7 +22,7 @@ from components.export_manager import ExportManager
 from components.user_settings import UserSettings
 
 # Настройки
-API_BASE_URL = os.getenv("API_BASE_URL", "http://localhost:8001")
+API_BASE_URL = os.getenv("API_BASE_URL", "http://api:8081")
 
 # Конфигурация страницы
 st.set_page_config(
