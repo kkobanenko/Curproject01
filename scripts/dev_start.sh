@@ -160,9 +160,9 @@ API_PID=$!
 cd ../..
 
 # Streamlit в фоне
-echo "   Запуск Streamlit на порту 8501..."
+echo "   Запуск Streamlit на порту 8502..."
 cd apps/streamlit_app
-streamlit run src/main.py --server.port 8501 --server.address 0.0.0.0 &
+streamlit run src/main.py --server.port 8502 --server.address 0.0.0.0 &
 STREAMLIT_PID=$!
 cd ../..
 
@@ -181,8 +181,8 @@ else
     print_status "warning" "API недоступен"
 fi
 
-if curl -s http://localhost:8501 > /dev/null; then
-    print_status "success" "Streamlit доступен на http://localhost:8501"
+if curl -s http://localhost:8502 > /dev/null; then
+    print_status "success" "Streamlit доступен на http://localhost:8502"
 else
     print_status "warning" "Streamlit недоступен"
 fi
@@ -192,7 +192,7 @@ echo ""
 echo "🎉 RAG Platform запущен в режиме разработки!"
 echo ""
 echo "📱 Доступные сервисы:"
-echo "  - Streamlit UI: http://localhost:8501"
+echo "  - Streamlit UI: http://localhost:8502"
 echo "  - API Docs: http://localhost:8081/docs"
 echo "  - API Health: http://localhost:8081/health"
 echo ""

@@ -34,14 +34,14 @@ pip install -r apps/streamlit_app/requirements.txt
 cd apps/api
 python3 -m uvicorn src.main:app --host 0.0.0.0 --port 8001 --reload
 
-# В другом терминале - запуск Streamlit (порт 8501)
+# В другом терминале - запуск Streamlit (порт 8502)
 cd apps/streamlit_app
-python3 -m streamlit run src/main.py --server.port 8501 --server.address 0.0.0.0
+python3 -m streamlit run src/main.py --server.port 8502 --server.address 0.0.0.0
 ```
 
 ### 3. Доступ к приложениям
 
-- **🌐 Streamlit Frontend**: http://localhost:8501
+- **🌐 Streamlit Frontend**: http://localhost:8502
 - **📡 API Backend**: http://localhost:8001
 - **📚 API Documentation**: http://localhost:8001/docs
 
@@ -61,7 +61,7 @@ python3 -m streamlit run src/main.py --server.port 8501 --server.address 0.0.0.0
 ```bash
 # Проверяем, что использует порт
 lsof -i :8001
-lsof -i :8501
+lsof -i :8502
 
 # Останавливаем процесс
 kill -9 <PID>
@@ -74,7 +74,7 @@ kill -9 <PID>
 curl http://localhost:8001/health
 
 # Проверяем, что Streamlit работает
-curl http://localhost:8501/
+curl http://localhost:8502/
 ```
 
 ## 📁 Структура проекта
@@ -134,7 +134,7 @@ curl -H "Authorization: Bearer test_token" \
 
 1. Проверьте логи в директории `logs/`
 2. Убедитесь, что все зависимости установлены
-3. Проверьте, что порты 8001 и 8501 свободны
+3. Проверьте, что порты 8001 и 8502 свободны
 4. Перезапустите сервисы с помощью скриптов
 
 ---

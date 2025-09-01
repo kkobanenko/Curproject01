@@ -168,7 +168,7 @@ class AlertSystem:
                     "username": getattr(settings, 'SMTP_USERNAME', ''),
                     "password": getattr(settings, 'SMTP_PASSWORD', ''),
                     "from_email": getattr(settings, 'SMTP_FROM_EMAIL', 'alerts@rag-system.com'),
-                    "to_emails": getattr(settings, 'ALERT_EMAILS', ['admin@rag-system.com']).split(',')
+                    "to_emails": getattr(settings, 'ALERT_EMAILS', ['admin@rag-system.com']) if isinstance(getattr(settings, 'ALERT_EMAILS', ['admin@rag-system.com']), list) else getattr(settings, 'ALERT_EMAILS', 'admin@rag-system.com').split(',')
                 }
             ),
             NotificationChannel(

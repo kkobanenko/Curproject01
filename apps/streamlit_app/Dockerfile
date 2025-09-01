@@ -18,11 +18,11 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY src/ ./src/
 
 # Открытие порта
-EXPOSE 8501
+EXPOSE 8502
 
 # Переменные окружения
 ENV PYTHONPATH=/app
-ENV STREAMLIT_SERVER_PORT=8501
+ENV STREAMLIT_SERVER_PORT=8502
 ENV STREAMLIT_SERVER_ADDRESS=0.0.0.0
 
 # Команда запуска

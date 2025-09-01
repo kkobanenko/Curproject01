@@ -49,20 +49,20 @@ start_api() {
 
 # Функция для запуска Streamlit
 start_streamlit() {
-    if check_port 8501 "Streamlit"; then
+    if check_port 8502 "Streamlit"; then
         return 0
     fi
     
-    echo "🔧 Запуск Streamlit на порту 8501..."
+    echo "🔧 Запуск Streamlit на порту 8502..."
     cd apps/streamlit_app
-    nohup python3 -m streamlit run src/main.py --server.port 8501 --server.address 0.0.0.0 > ../../logs/streamlit.log 2>&1 &
+    nohup python3 -m streamlit run src/main.py --server.port 8502 --server.address 0.0.0.0 > ../../logs/streamlit.log 2>&1 &
     cd ../..
     
     # Ждем запуска
     sleep 5
     
-    if check_port 8501 "Streamlit"; then
-        echo "✅ Streamlit успешно запущен на порту 8501"
+    if check_port 8502 "Streamlit"; then
+        echo "✅ Streamlit успешно запущен на порту 8502"
         return 0
     else
         echo "❌ Не удалось запустить Streamlit"
@@ -84,7 +84,7 @@ fi
 
 # Запускаем Streamlit
 if start_streamlit; then
-    echo "🌐 Streamlit доступен по адресу: http://localhost:8501"
+    echo "🌐 Streamlit доступен по адресу: http://localhost:8502"
 else
     echo "❌ Не удалось запустить Streamlit"
     exit 1
@@ -96,7 +96,7 @@ echo ""
 echo "📱 Доступные сервисы:"
 echo "   • API: http://localhost:8001"
 echo "   • API Docs: http://localhost:8001/docs"
-echo "   • Streamlit: http://localhost:8501"
+echo "   • Streamlit: http://localhost:8502"
 echo ""
 echo "📋 Логи сервисов:"
 echo "   • API: logs/api.log"

@@ -72,7 +72,7 @@ rag_env\Scripts\activate     # Windows
 Следующие порты должны быть свободны:
 - **8080**: Airflow
 - **8081**: API
-- **8501**: Streamlit
+- **8502**: Streamlit
 - **5432**: PostgreSQL
 - **6379**: Redis
 - **8123**: ClickHouse
@@ -82,10 +82,10 @@ rag_env\Scripts\activate     # Windows
 ### Проверка портов
 ```bash
 # Linux/macOS
-netstat -tuln | grep -E ':(8080|8081|8501|5432|6379|8123|8088|11434)'
+netstat -tuln | grep -E ':(8080|8081|8502|5432|6379|8123|8088|11434)'
 
 # Windows
-netstat -an | findstr "8080\|8081\|8501\|5432\|6379\|8123\|8088\|11434"
+netstat -an | findstr "8080\|8081\|8502\|5432\|6379\|8123\|8088\|11434"
 ```
 
 ## 🔒 Безопасность
@@ -94,11 +94,11 @@ netstat -an | findstr "8080\|8081\|8501\|5432\|6379\|8123\|8088\|11434"
 ```bash
 # Ubuntu/Debian
 sudo ufw allow 8081/tcp  # API
-sudo ufw allow 8501/tcp  # Streamlit
+sudo ufw allow 8502/tcp  # Streamlit
 
 # CentOS/RHEL
 sudo firewall-cmd --permanent --add-port=8081/tcp
-sudo firewall-cmd --permanent --add-port=8501/tcp
+sudo firewall-cmd --permanent --add-port=8502/tcp
 sudo firewall-cmd --reload
 ```
 
@@ -192,7 +192,7 @@ sudo systemctl enable docker
 ```bash
 # Поиск процессов на портах
 sudo lsof -i :8081
-sudo lsof -i :8501
+sudo lsof -i :8502
 
 # Остановка процессов
 sudo kill -9 <PID>

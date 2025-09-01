@@ -45,7 +45,7 @@ else
 fi
 
 # Streamlit
-if curl -s http://localhost:8501 > /dev/null; then
+if curl -s http://localhost:8502 > /dev/null; then
     print_status "success" "Streamlit доступен"
 else
     print_status "error" "Streamlit недоступен. Запустите: make dev"
@@ -136,7 +136,7 @@ echo ""
 echo "🎉 Демонстрация завершена!"
 echo ""
 echo "📱 Веб-интерфейс доступен по адресам:"
-echo "  - Streamlit UI: http://localhost:8501"
+echo "  - Streamlit UI: http://localhost:8502"
 echo "  - API Docs: http://localhost:8081/docs"
 echo ""
 echo "🔧 Дополнительные команды:"

@@ -56,7 +56,7 @@ stop_api() {
 
 # Останавливаем Streamlit
 stop_streamlit() {
-    stop_service 8501 "Streamlit"
+    stop_service 8502 "Streamlit"
 }
 
 # Останавливаем все сервисы
@@ -70,12 +70,12 @@ stop_streamlit
 echo ""
 echo "🔍 Проверка статуса сервисов..."
 
-if ! netstat -tln 2>/dev/null | grep ":8001 " >/dev/null 2>&1 && ! netstat -tln 2>/dev/null | grep ":8501 " >/dev/null 2>&1; then
+if ! netstat -tln 2>/dev/null | grep ":8001 " >/dev/null 2>&1 && ! netstat -tln 2>/dev/null | grep ":8502 " >/dev/null 2>&1; then
     echo "✅ Все сервисы остановлены"
     echo ""
     echo "📱 Статус портов:"
     echo "   • Порт 8001 (API): свободен"
-    echo "   • Порт 8501 (Streamlit): свободен"
+    echo "   • Порт 8502 (Streamlit): свободен"
 else
     echo "⚠️ Некоторые сервисы все еще запущены:"
     
@@ -83,14 +83,14 @@ else
         echo "   • API все еще работает на порту 8001"
     fi
     
-    if netstat -tln 2>/dev/null | grep ":8501 " >/dev/null 2>&1; then
-        echo "   • Streamlit все еще работает на порту 8501"
+    if netstat -tln 2>/dev/null | grep ":8502 " >/dev/null 2>&1; then
+        echo "   • Streamlit все еще работает на порту 8502"
     fi
     
     echo ""
     echo "💡 Для принудительной остановки используйте:"
     echo "   sudo netstat -tlnp | grep ':8001 ' | awk '{print \$7}' | cut -d'/' -f1 | xargs kill -KILL"
-    echo "   sudo netstat -tlnp | grep ':8501 ' | awk '{print \$7}' | cut -d'/' -f1 | xargs kill -KILL"
+    echo "   sudo netstat -tlnp | grep ':8502 ' | awk '{print \$7}' | cut -d'/' -f1 | xargs kill -KILL"
 fi
 
 echo ""

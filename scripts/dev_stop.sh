@@ -114,7 +114,7 @@ check_port() {
 }
 
 check_port 8081 "API"
-check_port 8501 "Streamlit"
+check_port 8502 "Streamlit"
 
 echo ""
 print_status "success" "RAG Platform остановлен"

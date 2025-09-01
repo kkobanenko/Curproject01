@@ -43,8 +43,8 @@ services:
       <<: *default-env
       CLICKHOUSE_DB: ${CLICKHOUSE_DB:-rag}
     ports:
-      - "8123:8123"
-      - "9000:9000"
+      - "${CLICKHOUSE_PORT:-8123}:8123"
+      - "9001:9000"
     volumes:
       - chdata:/var/lib/clickhouse
       - ./../db/clickhouse/init:/docker-entrypoint-initdb.d
@@ -230,6 +230,7 @@ services:
       PG_DSN: postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@postgres:5432/${PG_RAG_DB:-rag_app}
       REDIS_URL: redis://redis:6379/1
       CLICKHOUSE_URL: http://clickhouse:8123
+      CLICKHOUSE_HOST: clickhouse
       CONFIG_PATH: /app/configs/app.toml
     depends_on:
       - postgres
@@ -238,7 +239,7 @@ services:
       - ./../../configs:/app/configs
       - ./../../packages/rag_core:/app/rag_core
     ports:
-      - "${API_PORT:-8081}:8080"
+      - "${API_PORT:-8081}:8081"
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
       interval: 30s
@@ -252,13 +253,13 @@ services:
     container_name: ${PROJECT_NAME:-rag-platform}-streamlit
     environment:
       <<: *default-env
-      API_BASE_URL: http://api:8080
+      API_BASE_URL: http://api:8081
     depends_on:
       - api
     ports:
-      - "${STREAMLIT_PORT:-8501}:8501"
+      - "${STREAMLIT_PORT:-8502}:8502"
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8501/_stcore/health"]
+      test: ["CMD", "curl", "-f", "http://localhost:8502/_stcore/health"]
       interval: 30s
       timeout: 10s
       retries: 3

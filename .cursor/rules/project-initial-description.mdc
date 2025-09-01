@@ -14,3 +14,13 @@ CI/CD: GitHub Actions → build & push images to GHCR, deploy via Docker Compose
 Secrets: .env files (with .env.example).
 Repo layout: apps/{streamlit_app,api}; packages/rag_core (parse/OCR/tables/vectorstore/ranking); pipelines/airflow; infra/compose; db/{postgres,clickhouse}; superset/; llm/ollama/; configs/.
 Optional: enable reranker (bge-reranker-v2-m3) on top-k=20 → top-3 if retrieval precision is insufficient.
+
+Service Ports (current deployment):
+- Streamlit UI: 8502
+- FastAPI: 8081
+- Postgres (pgvector): 5433 
+- Redis: 6380
+- ClickHouse: 8124 (HTTP), 9001 (native)
+- Ollama: 11434
+- Airflow: 8080 (when enabled)
+- Superset: 8088 (when enabled)

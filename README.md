@@ -98,12 +98,12 @@ make dev
 
 # Приложения запустятся автоматически:
 # - API: http://localhost:8081
-# - Streamlit: http://localhost:8501
+# - Streamlit: http://localhost:8502
 ```
 
 ### 5. Доступ к сервисам
 
-- **Streamlit UI**: http://localhost:8501
+- **Streamlit UI**: http://localhost:8502
 - **API Docs**: http://localhost:8081/docs
 - **Airflow**: http://localhost:8080 (admin/airflow123)
 - **Superset**: http://localhost:8088
@@ -137,7 +137,7 @@ python -m uvicorn src.main:app --reload --port 8081
 # В отдельном терминале - Streamlit
 cd apps/streamlit_app
 pip install -r requirements.txt
-streamlit run src/main.py --server.port 8501
+streamlit run src/main.py --server.port 8502
 ```
 
 ## 📚 Использование
@@ -431,11 +431,11 @@ pip3 --version
 
 ```bash
 # Проверить занятые порты
-netstat -tuln | grep -E ':(8081|8501|5432|6379|8123|11434)'
+netstat -tuln | grep -E ':(8081|8502|5432|6379|8123|11434)'
 
 # Остановить процессы на портах
 sudo lsof -ti:8081 | xargs kill -9
-sudo lsof -ti:8501 | xargs kill -9
+sudo lsof -ti:8502 | xargs kill -9
 ```
 
 ### Общие проблемы
