@@ -15,7 +15,7 @@ Secrets: .env files (with .env.example).
 Repo layout: apps/{streamlit_app,api}; packages/rag_core (parse/OCR/tables/vectorstore/ranking); pipelines/airflow; infra/compose; db/{postgres,clickhouse}; superset/; llm/ollama/; configs/.
 Optional: enable reranker (bge-reranker-v2-m3) on top-k=20 → top-3 if retrieval precision is insufficient.
 
-Service Ports (current deployment):
+Service Ports (default values for current deployment):
 - Streamlit UI: 8502
 - FastAPI: 8081
 - Postgres (pgvector): 5433 
