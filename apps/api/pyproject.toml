@@ -1,0 +1,261 @@
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "rag-platform-api"
+version = "1.0.0"
+description = "RAG Platform API with comprehensive testing and performance optimization"
+authors = [
+    {name = "RAG Platform Team", email = "team@rag-platform.com"}
+]
+readme = "README.md"
+license = {text = "MIT"}
+requires-python = ">=3.11"
+classifiers = [
+    "Development Status :: 5 - Production/Stable",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Framework :: FastAPI",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+    "Topic :: Internet :: WWW/HTTP :: HTTP Servers",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+]
+
+dependencies = [
+    "fastapi>=0.104.0",
+    "uvicorn[standard]>=0.24.0",
+    "pydantic>=2.4.0",
+    "pydantic-settings>=2.0.0",
+    "sqlalchemy>=2.0.0",
+    "asyncpg>=0.29.0",
+    "redis>=5.0.0",
+    "httpx>=0.25.0",
+    "python-multipart>=0.0.6",
+    "python-jose[cryptography]>=3.3.0",
+    "passlib[bcrypt]>=1.7.4",
+    "python-dotenv>=1.0.0",
+    "loguru>=0.7.0",
+    "prometheus-client>=0.17.0",
+    "psutil>=5.9.0",
+    "clickhouse-connect>=0.6.23",
+    "cryptography>=41.0.0",
+    "pyotp>=2.8.0",
+    "pandas>=2.0.0",
+    "openpyxl>=3.1.0",
+    "PyYAML>=6.0"
+]
+
+[project.optional-dependencies]
+test = [
+    "pytest>=7.4.0",
+    "pytest-asyncio>=0.21.0",
+    "pytest-cov>=4.1.0",
+    "pytest-mock>=3.11.0",
+    "pytest-xdist>=3.3.0",
+    "pytest-html>=3.2.0",
+    "pytest-benchmark>=4.0.0",
+    "pytest-timeout>=2.1.0",
+    "httpx>=0.25.0",
+    "factory-boy>=3.3.0",
+    "faker>=19.0.0",
+    "coverage[toml]>=7.3.0",
+]
+
+dev = [
+    "black>=23.0.0",
+    "isort>=5.12.0",
+    "flake8>=6.0.0",
+    "mypy>=1.5.0",
+    "pre-commit>=3.4.0",
+    "bandit>=1.7.5",
+    "safety>=2.3.0",
+]
+
+docs = [
+    "mkdocs>=1.5.0",
+    "mkdocs-material>=9.2.0",
+    "mkdocstrings[python]>=0.23.0",
+]
+
+[project.urls]
+Homepage = "https://github.com/rag-platform/api"
+Documentation = "https://rag-platform.github.io/api"
+Repository = "https://github.com/rag-platform/api"
+Issues = "https://github.com/rag-platform/api/issues"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+"*" = ["*.yaml", "*.yml", "*.json", "*.toml"]
+
+# Конфигурация pytest
+[tool.pytest.ini_options]
+testpaths = ["src/tests"]
+python_files = ["test_*.py", "*_test.py"]
+python_classes = ["Test*"]
+python_functions = ["test_*"]
+minversion = "7.0"
+addopts = [
+    "--verbose",
+    "--tb=short",
+    "--strict-markers",
+    "--strict-config",
+    "--cov=src",
+    "--cov-report=html:htmlcov", 
+    "--cov-report=xml:coverage.xml",
+    "--cov-report=term-missing",
+    "--cov-fail-under=80",
+    "--cov-branch",
+    "--durations=10",
+    "--maxfail=5"
+]
+markers = [
+    "unit: Unit tests - быстрые изолированные тесты",
+    "integration: Integration tests - тесты взаимодействия компонентов", 
+    "e2e: End-to-end tests - полные пользовательские сценарии",
+    "load: Load tests - нагрузочные тесты производительности",
+    "slow: Slow tests - медленные тесты (>1 секунды)",
+    "database: Tests requiring database connection",
+    "redis: Tests requiring Redis connection",
+    "external: Tests requiring external services",
+    "security: Security-related tests",
+    "performance: Performance benchmarking tests"
+]
+
+# Конфигурация coverage
+[tool.coverage.run]
+source = ["src"]
+omit = [
+    "src/tests/*",
+    "src/*/test_*.py", 
+    "src/*/*/test_*.py",
+    "src/main.py",
+    "*/venv/*",
+    "*/virtualenv/*",
+    "*/.venv/*",
+    "*/site-packages/*",
+    "*/__pycache__/*"
+]
+branch = true
+parallel = true
+
+[tool.coverage.report]
+exclude_lines = [
+    "pragma: no cover",
+    "def __repr__",
+    "def __str__",
+    "raise AssertionError",
+    "raise NotImplementedError", 
+    "if __name__ == .__main__.:",
+    "if TYPE_CHECKING:",
+    "@abstractmethod",
+    "@abc.abstractmethod",
+    "class .*\\bProtocol\\):",
+    "raise NotImplementedError"
+]
+ignore_errors = true
+show_missing = true
+skip_covered = false
+precision = 2
+
+[tool.coverage.html]
+directory = "htmlcov"
+title = "RAG Platform API Coverage Report"
+
+[tool.coverage.xml]
+output = "coverage.xml"
+
+# Конфигурация Black
+[tool.black]
+line-length = 100
+target-version = ['py311']
+include = '\.pyi?$'
+extend-exclude = '''
+/(
+  # directories
+  \.eggs
+  | \.git
+  | \.hg
+  | \.mypy_cache
+  | \.tox
+  | \.venv
+  | build
+  | dist
+  | migrations
+)/
+'''
+
+# Конфигурация isort
+[tool.isort]
+profile = "black"
+line_length = 100
+multi_line_output = 3
+include_trailing_comma = true
+force_grid_wrap = 0
+use_parentheses = true
+ensure_newline_before_comments = true
+known_first_party = ["src"]
+known_third_party = ["fastapi", "pydantic", "sqlalchemy", "pytest"]
+
+# Конфигурация mypy
+[tool.mypy]
+python_version = "3.11"
+warn_return_any = true
+warn_unused_configs = true
+disallow_untyped_defs = true
+disallow_incomplete_defs = true
+check_untyped_defs = true
+disallow_untyped_decorators = true
+no_implicit_optional = true
+warn_redundant_casts = true
+warn_unused_ignores = true
+warn_no_return = true
+warn_unreachable = true
+strict_equality = true
+show_error_codes = true
+
+[[tool.mypy.overrides]]
+module = [
+    "uvicorn.*",
+    "redis.*",
+    "asyncpg.*",
+    "clickhouse_connect.*",
+    "psutil.*",
+    "pandas.*",
+    "openpyxl.*"
+]
+ignore_missing_imports = true
+
+# Конфигурация bandit (безопасность)
+[tool.bandit]
+exclude_dirs = ["tests", "src/tests"]
+skips = ["B101", "B601"]  # Skip assert_used and shell injection warnings for tests
+
+# Конфигурация ruff (быстрый линтер)
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+select = [
+    "E",  # pycodestyle errors
+    "W",  # pycodestyle warnings
+    "F",  # pyflakes
+    "I",  # isort
+    "B",  # flake8-bugbear
+    "C4", # flake8-comprehensions
+    "UP", # pyupgrade
+]
+ignore = [
+    "E501",  # line too long, handled by black
+    "B008",  # do not perform function calls in argument defaults
+    "C901",  # too complex
+]
+
+[tool.ruff.per-file-ignores]
+"__init__.py" = ["F401"]
+"src/tests/*" = ["B011", "B018"]
