@@ -1,0 +1,491 @@
+# Default values for rag-platform
+# This is a YAML-formatted file.
+
+global:
+  environment: development
+  imageTag: latest
+  domain: localhost
+  imagePullPolicy: IfNotPresent
+  storageClass: standard
+
+# API Service Configuration
+api:
+  enabled: true
+  image: ghcr.io/rag-platform/rag-platform/api
+  tag: ""  # Will use global.imageTag if empty
+  replicas: 2
+  
+  service:
+    type: ClusterIP
+    port: 8081
+    targetPort: 8081
+  
+  resources:
+    requests:
+      cpu: 200m
+      memory: 512Mi
+    limits:
+      cpu: 1000m
+      memory: 2Gi
+  
+  autoscaling:
+    enabled: false
+    minReplicas: 2
+    maxReplicas: 10
+    targetCPUUtilizationPercentage: 70
+    targetMemoryUtilizationPercentage: 80
+  
+  env:
+    DATABASE_URL: "postgresql://postgres:postgres@rag-platform-postgresql:5432/rag_db"
+    REDIS_URL: "redis://rag-platform-redis-master:6379/0"
+    CLICKHOUSE_URL: "http://rag-platform-clickhouse:8123"
+    ENVIRONMENT: "production"
+    LOG_LEVEL: "INFO"
+    API_HOST: "0.0.0.0"
+    API_PORT: "8081"
+    CORS_ORIGINS: "*"
+    JWT_SECRET_KEY: ""  # Will be set from secret
+    JWT_ALGORITHM: "HS256"
+    JWT_EXPIRE_MINUTES: "60"
+    RATE_LIMIT_REQUESTS: "100"
+    RATE_LIMIT_WINDOW: "60"
+    CACHE_TTL: "3600"
+    OLLAMA_BASE_URL: "http://ollama:11434"
+    EMBEDDING_MODEL: "bge-m3"
+    LLM_MODEL: "llama2"
+  
+  livenessProbe:
+    httpGet:
+      path: /health
+      port: 8081
+    initialDelaySeconds: 30
+    periodSeconds: 10
+    timeoutSeconds: 5
+    failureThreshold: 3
+  
+  readinessProbe:
+    httpGet:
+      path: /ready
+      port: 8081
+    initialDelaySeconds: 15
+    periodSeconds: 5
+    timeoutSeconds: 3
+    failureThreshold: 3
+
+# Streamlit Frontend Configuration
+streamlit:
+  enabled: true
+  image: ghcr.io/rag-platform/rag-platform/streamlit
+  tag: ""
+  replicas: 2
+  
+  service:
+    type: ClusterIP
+    port: 8502
+    targetPort: 8502
+  
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      cpu: 500m
+      memory: 1Gi
+  
+  autoscaling:
+    enabled: false
+    minReplicas: 2
+    maxReplicas: 8
+    targetCPUUtilizationPercentage: 70
+  
+  env:
+    API_BASE_URL: "http://rag-platform-api:8081"
+    STREAMLIT_SERVER_PORT: "8502"
+    STREAMLIT_SERVER_ADDRESS: "0.0.0.0"
+    STREAMLIT_BROWSER_GATHER_USAGE_STATS: "false"
+    STREAMLIT_SERVER_FILE_WATCHER_TYPE: "none"
+  
+  livenessProbe:
+    httpGet:
+      path: /
+      port: 8502
+    initialDelaySeconds: 60
+    periodSeconds: 30
+    timeoutSeconds: 10
+    failureThreshold: 3
+  
+  readinessProbe:
+    httpGet:
+      path: /
+      port: 8502
+    initialDelaySeconds: 30
+    periodSeconds: 10
+    timeoutSeconds: 5
+    failureThreshold: 3
+
+# Superset Configuration
+superset:
+  enabled: true
+  image: ghcr.io/rag-platform/rag-platform/superset
+  tag: ""
+  replicas: 1
+  
+  service:
+    type: ClusterIP
+    port: 8090
+    targetPort: 8088
+  
+  resources:
+    requests:
+      cpu: 200m
+      memory: 1Gi
+    limits:
+      cpu: 1000m
+      memory: 4Gi
+  
+  env:
+    SUPERSET_DATABASE_URI: "postgresql://postgres:postgres@rag-platform-postgresql:5432/superset"
+    REDIS_URL: "redis://rag-platform-redis-master:6379/1"
+    SUPERSET_SECRET_KEY: ""  # Will be set from secret
+    SUPERSET_CONFIG_PATH: "/app/superset_config.py"
+  
+  livenessProbe:
+    httpGet:
+      path: /health
+      port: 8088
+    initialDelaySeconds: 120
+    periodSeconds: 30
+    timeoutSeconds: 10
+    failureThreshold: 5
+  
+  readinessProbe:
+    httpGet:
+      path: /health
+      port: 8088
+    initialDelaySeconds: 60
+    periodSeconds: 10
+    timeoutSeconds: 5
+    failureThreshold: 5
+
+# Airflow Configuration
+airflow:
+  enabled: true
+  image: ghcr.io/rag-platform/rag-platform/airflow
+  tag: ""
+  
+  webserver:
+    replicas: 1
+    resources:
+      requests:
+        cpu: 200m
+        memory: 512Mi
+      limits:
+        cpu: 1000m
+        memory: 2Gi
+  
+  scheduler:
+    replicas: 1
+    resources:
+      requests:
+        cpu: 200m
+        memory: 512Mi
+      limits:
+        cpu: 1000m
+        memory: 2Gi
+  
+  worker:
+    replicas: 2
+    resources:
+      requests:
+        cpu: 200m
+        memory: 512Mi
+      limits:
+        cpu: 1000m
+        memory: 2Gi
+  
+  service:
+    type: ClusterIP
+    port: 8080
+    targetPort: 8080
+  
+  env:
+    AIRFLOW__CORE__EXECUTOR: "CeleryExecutor"
+    AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: "postgresql://postgres:postgres@rag-platform-postgresql:5432/airflow"
+    AIRFLOW__CELERY__BROKER_URL: "redis://rag-platform-redis-master:6379/2"
+    AIRFLOW__CELERY__RESULT_BACKEND: "redis://rag-platform-redis-master:6379/2"
+    AIRFLOW__CORE__FERNET_KEY: ""  # Will be set from secret
+    AIRFLOW__WEBSERVER__SECRET_KEY: ""  # Will be set from secret
+
+# Ollama LLM Service
+ollama:
+  enabled: true
+  image: ollama/ollama
+  tag: latest
+  replicas: 1
+  
+  service:
+    type: ClusterIP
+    port: 11434
+    targetPort: 11434
+  
+  resources:
+    requests:
+      cpu: 1000m
+      memory: 4Gi
+    limits:
+      cpu: 4000m
+      memory: 8Gi
+  
+  persistence:
+    enabled: true
+    size: 50Gi
+    accessMode: ReadWriteOnce
+    storageClass: ""
+  
+  models:
+    - llama2
+    - bge-m3
+    - nomic-embed-text
+
+# PostgreSQL Database
+postgresql:
+  enabled: true
+  auth:
+    postgresPassword: "postgres"
+    username: "postgres"
+    password: "postgres"
+    database: "rag_db"
+  
+  primary:
+    persistence:
+      enabled: true
+      size: 100Gi
+      storageClass: ""
+    
+    resources:
+      requests:
+        cpu: 250m
+        memory: 1Gi
+      limits:
+        cpu: 1000m
+        memory: 4Gi
+    
+    initdb:
+      scripts:
+        00-extensions.sql: |
+          CREATE EXTENSION IF NOT EXISTS vector;
+          CREATE EXTENSION IF NOT EXISTS pg_stat_statements;
+        01-databases.sql: |
+          CREATE DATABASE superset;
+          CREATE DATABASE airflow;
+          CREATE DATABASE metrics;
+  
+  readReplicas:
+    replicaCount: 0
+    persistence:
+      enabled: true
+      size: 100Gi
+
+# Redis Cache
+redis:
+  enabled: true
+  architecture: standalone
+  auth:
+    enabled: false
+  
+  master:
+    persistence:
+      enabled: true
+      size: 20Gi
+      storageClass: ""
+    
+    resources:
+      requests:
+        cpu: 100m
+        memory: 256Mi
+      limits:
+        cpu: 500m
+        memory: 1Gi
+
+# ClickHouse Analytics DB
+clickhouse:
+  enabled: true
+  auth:
+    username: "default"
+    password: ""
+  
+  persistence:
+    enabled: true
+    size: 50Gi
+    storageClass: ""
+  
+  resources:
+    requests:
+      cpu: 200m
+      memory: 1Gi
+    limits:
+      cpu: 1000m
+      memory: 4Gi
+
+# Ingress Configuration
+ingress:
+  enabled: true
+  className: "nginx"
+  annotations:
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+    nginx.ingress.kubernetes.io/force-ssl-redirect: "true"
+    cert-manager.io/cluster-issuer: "letsencrypt-prod"
+    nginx.ingress.kubernetes.io/rate-limit: "100"
+    nginx.ingress.kubernetes.io/rate-limit-window: "1m"
+  
+  hosts:
+    - host: ""  # Will be set from global.domain
+      paths:
+        - path: /
+          pathType: Prefix
+          backend:
+            service:
+              name: rag-platform-streamlit
+              port: 8502
+        - path: /api
+          pathType: Prefix
+          backend:
+            service:
+              name: rag-platform-api
+              port: 8081
+        - path: /superset
+          pathType: Prefix
+          backend:
+            service:
+              name: rag-platform-superset
+              port: 8090
+        - path: /airflow
+          pathType: Prefix
+          backend:
+            service:
+              name: rag-platform-airflow
+              port: 8080
+  
+  tls:
+    - secretName: rag-platform-tls
+      hosts:
+        - ""  # Will be set from global.domain
+
+# Monitoring Configuration
+monitoring:
+  enabled: true
+  
+  prometheus:
+    enabled: true
+    server:
+      persistentVolume:
+        size: 50Gi
+    
+    alertmanager:
+      enabled: true
+      persistentVolume:
+        size: 10Gi
+  
+  grafana:
+    enabled: true
+    persistence:
+      enabled: true
+      size: 10Gi
+    
+    admin:
+      existingSecret: "grafana-admin"
+      userKey: "admin-user"
+      passwordKey: "admin-password"
+
+# Security Configuration
+security:
+  podSecurityPolicy:
+    enabled: false
+  
+  networkPolicy:
+    enabled: false
+  
+  securityContext:
+    runAsNonRoot: true
+    runAsUser: 1000
+    fsGroup: 1000
+
+# Service Mesh (Optional)
+serviceMesh:
+  istio:
+    enabled: false
+  linkerd:
+    enabled: false
+
+# Backup Configuration
+backup:
+  enabled: false
+  schedule: "0 2 * * *"  # Daily at 2 AM
+  retention: "30d"
+  
+  postgresql:
+    enabled: false
+  
+  volumes:
+    enabled: false
+
+# Secrets Management
+secrets:
+  external:
+    enabled: false
+    secretManager: "aws"  # aws, azure, gcp, vault
+  
+  generate:
+    enabled: true
+    length: 32
+
+# Resource Quotas
+resourceQuota:
+  enabled: false
+  requests:
+    cpu: "4"
+    memory: "16Gi"
+  limits:
+    cpu: "8"
+    memory: "32Gi"
+
+# Node Affinity & Tolerations
+nodeSelector: {}
+
+tolerations: []
+
+affinity: {}
+
+# Pod Disruption Budgets
+podDisruptionBudget:
+  enabled: true
+  minAvailable: 1
+
+# Init Containers
+initContainers:
+  enabled: true
+  
+  waitForDb:
+    image: postgres:15
+    command:
+      - sh
+      - -c
+      - |
+        until pg_isready -h rag-platform-postgresql -p 5432 -U postgres; do
+          echo "Waiting for PostgreSQL..."
+          sleep 2
+        done
+  
+  waitForRedis:
+    image: redis:7-alpine
+    command:
+      - sh
+      - -c
+      - |
+        until redis-cli -h rag-platform-redis-master ping; do
+          echo "Waiting for Redis..."
+          sleep 2
+        done
+
+# Extra Manifests
+extraManifests: []

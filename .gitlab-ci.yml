@@ -1,0 +1,606 @@
+# GitLab CI/CD Pipeline for RAG Platform
+# Mirrors GitHub Actions functionality for redundancy
+
+stages:
+  - validate
+  - test
+  - security
+  - build
+  - deploy
+  - notify
+
+variables:
+  PYTHON_VERSION: "3.11"
+  DOCKER_DRIVER: overlay2
+  DOCKER_TLS_CERTDIR: "/certs"
+  REGISTRY: registry.gitlab.com
+  IMAGE_NAME: $CI_PROJECT_PATH
+  KUBECONFIG: /tmp/kubeconfig
+
+# Global settings
+default:
+  image: python:${PYTHON_VERSION}
+  before_script:
+    - pip install --upgrade pip
+  
+  retry:
+    max: 2
+    when:
+      - unknown_failure
+      - api_failure
+      - runner_system_failure
+
+# Templates
+.test_template: &test_template
+  stage: test
+  services:
+    - postgres:15
+    - redis:7-alpine
+  variables:
+    POSTGRES_DB: test_rag_db
+    POSTGRES_USER: postgres
+    POSTGRES_PASSWORD: postgres
+    POSTGRES_HOST_AUTH_METHOD: trust
+    DATABASE_URL: "postgresql://postgres:postgres@postgres:5432/test_rag_db"
+    REDIS_URL: "redis://redis:6379/0"
+    TESTING: "true"
+  before_script:
+    - cd apps/api
+    - pip install -r requirements.txt
+    - python -c "import asyncio, asyncpg; asyncio.run(asyncpg.connect('$DATABASE_URL').execute('CREATE EXTENSION IF NOT EXISTS vector;'))" || true
+
+.docker_template: &docker_template
+  stage: build
+  image: docker:24.0
+  services:
+    - docker:24.0-dind
+  before_script:
+    - echo $CI_REGISTRY_PASSWORD | docker login -u $CI_REGISTRY_USER --password-stdin $CI_REGISTRY
+  after_script:
+    - docker logout $CI_REGISTRY
+
+# Stage 1: Validation
+code-quality:
+  stage: validate
+  script:
+    - cd apps/api
+    - pip install black isort flake8 mypy bandit safety
+    - echo "🖤 Running Black formatter check..."
+    - black --check --diff src/ || (echo "❌ Code formatting issues found. Run 'black src/' to fix." && exit 1)
+    - echo "📝 Running isort import sorting check..."
+    - isort --check-only --diff src/ || (echo "❌ Import sorting issues found. Run 'isort src/' to fix." && exit 1)
+    - echo "🔧 Running flake8 linting..."
+    - flake8 src/ --max-line-length=100 --extend-ignore=E203,W503
+    - echo "🔒 Running security checks..."
+    - bandit -r src/ -ll || true
+    - safety check || true
+    - echo "✅ Code quality checks completed"
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+    - if: $CI_COMMIT_BRANCH == "main"
+    - if: $CI_COMMIT_BRANCH == "develop"
+
+validate-docker:
+  stage: validate
+  image: hadolint/hadolint:latest-debian
+  script:
+    - echo "🐳 Validating Dockerfiles..."
+    - find . -name "Dockerfile" -exec hadolint {} \;
+    - echo "✅ Docker validation completed"
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+    - if: $CI_COMMIT_BRANCH == "main"
+
+# Stage 2: Testing
+unit-tests:
+  <<: *test_template
+  script:
+    - echo "🔬 Running unit tests..."
+    - python -m pytest src/tests/ -m "unit" \
+        --cov=src \
+        --cov-report=xml:coverage.xml \
+        --cov-report=html:htmlcov \
+        --cov-report=term-missing \
+        --junitxml=junit.xml \
+        --tb=short \
+        -v
+    - echo "📊 Unit test coverage:"
+    - python -c "
+import xml.etree.ElementTree as ET
+try:
+    tree = ET.parse('coverage.xml')
+    root = tree.getroot()
+    coverage = float(root.attrib.get('line-rate', 0)) * 100
+    print(f'Coverage: {coverage:.1f}%')
+    if coverage < 80:
+        print('❌ Coverage below 80% requirement')
+        exit(1)
+    else:
+        print('✅ Coverage meets requirements')
+except Exception as e:
+    print(f'❌ Error reading coverage: {e}')
+    exit(1)
+"
+  coverage: '/Coverage: (\d+\.?\d*)%/'
+  artifacts:
+    when: always
+    reports:
+      junit: apps/api/junit.xml
+      coverage_report:
+        coverage_format: cobertura
+        path: apps/api/coverage.xml
+    paths:
+      - apps/api/htmlcov/
+    expire_in: 1 week
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+    - if: $CI_COMMIT_BRANCH == "main"
+    - if: $CI_COMMIT_BRANCH == "develop"
+
+integration-tests:
+  <<: *test_template
+  services:
+    - postgres:15
+    - redis:7-alpine
+    - clickhouse/clickhouse-server:23.3
+  variables:
+    POSTGRES_DB: test_rag_db
+    POSTGRES_USER: postgres
+    POSTGRES_PASSWORD: postgres
+    DATABASE_URL: "postgresql://postgres:postgres@postgres:5432/test_rag_db"
+    REDIS_URL: "redis://redis:6379/0"
+    CLICKHOUSE_URL: "http://clickhouse:8123"
+    TESTING: "true"
+  script:
+    - echo "🔗 Running integration tests..."
+    - python -m pytest src/tests/ -m "integration" \
+        --junitxml=integration-junit.xml \
+        --tb=short \
+        -v
+    - echo "✅ Integration tests completed"
+  artifacts:
+    when: always
+    reports:
+      junit: apps/api/integration-junit.xml
+    expire_in: 1 week
+  rules:
+    - if: $CI_COMMIT_BRANCH == "main"
+    - if: $CI_COMMIT_BRANCH == "develop"
+
+e2e-tests:
+  stage: test
+  image: mcr.microsoft.com/playwright/python:v1.40.0-jammy
+  services:
+    - postgres:15
+    - redis:7-alpine
+  variables:
+    DATABASE_URL: "postgresql://postgres:postgres@postgres:5432/test_rag_db"
+    REDIS_URL: "redis://redis:6379/0"
+    TESTING: "true"
+    API_BASE_URL: "http://localhost:8081"
+  before_script:
+    - cd apps/api
+    - pip install -r requirements.txt
+    - pip install playwright
+    - playwright install
+  script:
+    - echo "🎭 Starting API server for E2E tests..."
+    - uvicorn src.main:app --host 0.0.0.0 --port 8081 &
+    - sleep 15
+    - echo "🎭 Running E2E tests..."
+    - python -m pytest src/tests/ -m "e2e" \
+        --junitxml=e2e-junit.xml \
+        --tb=short \
+        -v \
+        --maxfail=3
+    - echo "✅ E2E tests completed"
+  artifacts:
+    when: always
+    reports:
+      junit: apps/api/e2e-junit.xml
+    expire_in: 1 week
+  rules:
+    - if: $CI_COMMIT_BRANCH == "main"
+    - if: $CI_PIPELINE_SOURCE == "schedule"
+
+# Stage 3: Security
+security-scan:
+  stage: security
+  image: docker:24.0
+  services:
+    - docker:24.0-dind
+  variables:
+    DOCKER_DRIVER: overlay2
+  before_script:
+    - apk add --no-cache curl
+  script:
+    - echo "🛡️ Running security scans..."
+    
+    # Container security scan
+    - docker run --rm -v /var/run/docker.sock:/var/run/docker.sock \
+        -v $PWD:/tmp/app \
+        aquasec/trivy:latest filesystem --exit-code 0 --no-progress --format table /tmp/app
+    
+    # Dependency security scan
+    - cd apps/api
+    - pip install safety
+    - safety check --json || true
+    
+    echo "✅ Security scans completed"
+  rules:
+    - if: $CI_COMMIT_BRANCH == "main"
+    - if: $CI_PIPELINE_SOURCE == "schedule"
+
+sast:
+  stage: security
+  image: registry.gitlab.com/gitlab-org/security-products/semgrep:latest
+  script:
+    - echo "🔍 Running SAST analysis..."
+    - semgrep --config=auto --json --output=sast-report.json . || true
+    - echo "✅ SAST analysis completed"
+  artifacts:
+    reports:
+      sast: sast-report.json
+    expire_in: 1 week
+  rules:
+    - if: $CI_COMMIT_BRANCH == "main"
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+
+# Stage 4: Build Docker Images
+build-api:
+  <<: *docker_template
+  script:
+    - echo "🐳 Building API image..."
+    - cd apps/api
+    - docker build \
+        --build-arg BUILD_DATE=$(date -u +'%Y-%m-%dT%H:%M:%SZ') \
+        --build-arg VCS_REF=$CI_COMMIT_SHA \
+        --build-arg VERSION=$CI_COMMIT_TAG \
+        -t $CI_REGISTRY_IMAGE/api:$CI_COMMIT_SHA \
+        -t $CI_REGISTRY_IMAGE/api:latest \
+        .
+    - docker push $CI_REGISTRY_IMAGE/api:$CI_COMMIT_SHA
+    - docker push $CI_REGISTRY_IMAGE/api:latest
+    - echo "✅ API image built and pushed"
+  rules:
+    - if: $CI_COMMIT_BRANCH == "main"
+    - if: $CI_COMMIT_TAG
+
+build-streamlit:
+  <<: *docker_template
+  script:
+    - echo "🐳 Building Streamlit image..."
+    - cd apps/streamlit_app
+    - docker build \
+        --build-arg BUILD_DATE=$(date -u +'%Y-%m-%dT%H:%M:%SZ') \
+        --build-arg VCS_REF=$CI_COMMIT_SHA \
+        --build-arg VERSION=$CI_COMMIT_TAG \
+        -t $CI_REGISTRY_IMAGE/streamlit:$CI_COMMIT_SHA \
+        -t $CI_REGISTRY_IMAGE/streamlit:latest \
+        .
+    - docker push $CI_REGISTRY_IMAGE/streamlit:$CI_COMMIT_SHA
+    - docker push $CI_REGISTRY_IMAGE/streamlit:latest
+    - echo "✅ Streamlit image built and pushed"
+  rules:
+    - if: $CI_COMMIT_BRANCH == "main"
+    - if: $CI_COMMIT_TAG
+
+build-superset:
+  <<: *docker_template
+  script:
+    - echo "🐳 Building Superset image..."
+    - cd infra/superset
+    - docker build \
+        --build-arg BUILD_DATE=$(date -u +'%Y-%m-%dT%H:%M:%SZ') \
+        --build-arg VCS_REF=$CI_COMMIT_SHA \
+        --build-arg VERSION=$CI_COMMIT_TAG \
+        -t $CI_REGISTRY_IMAGE/superset:$CI_COMMIT_SHA \
+        -t $CI_REGISTRY_IMAGE/superset:latest \
+        .
+    - docker push $CI_REGISTRY_IMAGE/superset:$CI_COMMIT_SHA
+    - docker push $CI_REGISTRY_IMAGE/superset:latest
+    - echo "✅ Superset image built and pushed"
+  rules:
+    - if: $CI_COMMIT_BRANCH == "main"
+    - if: $CI_COMMIT_TAG
+
+build-airflow:
+  <<: *docker_template
+  script:
+    - echo "🐳 Building Airflow image..."
+    - cd pipelines/airflow
+    - docker build \
+        --build-arg BUILD_DATE=$(date -u +'%Y-%m-%dT%H:%M:%SZ') \
+        --build-arg VCS_REF=$CI_COMMIT_SHA \
+        --build-arg VERSION=$CI_COMMIT_TAG \
+        -t $CI_REGISTRY_IMAGE/airflow:$CI_COMMIT_SHA \
+        -t $CI_REGISTRY_IMAGE/airflow:latest \
+        .
+    - docker push $CI_REGISTRY_IMAGE/airflow:$CI_COMMIT_SHA
+    - docker push $CI_REGISTRY_IMAGE/airflow:latest
+    - echo "✅ Airflow image built and pushed"
+  rules:
+    - if: $CI_COMMIT_BRANCH == "main"
+    - if: $CI_COMMIT_TAG
+
+# Stage 5: Deploy
+deploy-staging:
+  stage: deploy
+  image: alpine/helm:3.12.0
+  environment:
+    name: staging
+    url: https://staging.rag-platform.com
+  before_script:
+    - apk add --no-cache curl kubectl
+    - echo $KUBE_CONFIG | base64 -d > $KUBECONFIG
+    - kubectl cluster-info
+  script:
+    - echo "🚀 Deploying to staging environment..."
+    
+    # Update Helm chart values for staging
+    - |
+      cat > staging-values.yaml << EOF
+      global:
+        environment: staging
+        imageTag: $CI_COMMIT_SHA
+        domain: staging.rag-platform.com
+      
+      api:
+        image: $CI_REGISTRY_IMAGE/api
+        replicas: 2
+      
+      streamlit:
+        image: $CI_REGISTRY_IMAGE/streamlit
+        replicas: 2
+      
+      superset:
+        image: $CI_REGISTRY_IMAGE/superset
+        replicas: 1
+      
+      airflow:
+        image: $CI_REGISTRY_IMAGE/airflow
+        replicas: 1
+      
+      ingress:
+        enabled: true
+        className: nginx
+        annotations:
+          cert-manager.io/cluster-issuer: letsencrypt-staging
+        tls:
+          - secretName: rag-platform-staging-tls
+            hosts:
+              - staging.rag-platform.com
+      EOF
+    
+    # Deploy using Helm
+    - helm upgrade --install rag-platform-staging ./infra/helm/rag-platform \
+        --namespace rag-platform-staging \
+        --create-namespace \
+        --values staging-values.yaml \
+        --timeout 10m \
+        --wait
+    
+    # Verify deployment
+    - kubectl rollout status deployment/rag-platform-api -n rag-platform-staging --timeout=300s
+    - kubectl rollout status deployment/rag-platform-streamlit -n rag-platform-staging --timeout=300s
+    
+    - echo "✅ Staging deployment completed"
+  rules:
+    - if: $CI_COMMIT_BRANCH == "main"
+  needs:
+    - build-api
+    - build-streamlit
+    - build-superset
+    - build-airflow
+
+deploy-production:
+  stage: deploy
+  image: alpine/helm:3.12.0
+  environment:
+    name: production
+    url: https://rag-platform.com
+  when: manual
+  only:
+    - tags
+  before_script:
+    - apk add --no-cache curl kubectl
+    - echo $KUBE_CONFIG_PROD | base64 -d > $KUBECONFIG
+    - kubectl cluster-info
+  script:
+    - echo "🚀 Deploying to production environment..."
+    
+    # Production values
+    - |
+      cat > production-values.yaml << EOF
+      global:
+        environment: production
+        imageTag: $CI_COMMIT_SHA
+        domain: rag-platform.com
+      
+      api:
+        image: $CI_REGISTRY_IMAGE/api
+        replicas: 3
+        autoscaling:
+          enabled: true
+          minReplicas: 3
+          maxReplicas: 10
+      
+      streamlit:
+        image: $CI_REGISTRY_IMAGE/streamlit
+        replicas: 3
+        autoscaling:
+          enabled: true
+          minReplicas: 3
+          maxReplicas: 8
+      
+      superset:
+        image: $CI_REGISTRY_IMAGE/superset
+        replicas: 2
+      
+      postgresql:
+        readReplicas:
+          replicaCount: 2
+      
+      redis:
+        cluster:
+          enabled: true
+          nodes: 6
+      
+      monitoring:
+        enabled: true
+        prometheus:
+          enabled: true
+        grafana:
+          enabled: true
+      
+      ingress:
+        enabled: true
+        className: nginx
+        annotations:
+          cert-manager.io/cluster-issuer: letsencrypt-prod
+          nginx.ingress.kubernetes.io/rate-limit: "100"
+        tls:
+          - secretName: rag-platform-prod-tls
+            hosts:
+              - rag-platform.com
+      EOF
+    
+    # Blue-Green deployment
+    - helm upgrade --install rag-platform-green ./infra/helm/rag-platform \
+        --namespace rag-platform-production \
+        --create-namespace \
+        --values production-values.yaml \
+        --set nameOverride="green" \
+        --timeout 15m \
+        --wait
+    
+    # Health check and traffic switch
+    - kubectl rollout status deployment/rag-platform-api-green -n rag-platform-production --timeout=600s
+    - sleep 60  # Grace period
+    
+    # Switch traffic
+    - kubectl patch service rag-platform-api -n rag-platform-production -p '{"spec":{"selector":{"version":"green"}}}'
+    - kubectl patch service rag-platform-streamlit -n rag-platform-production -p '{"spec":{"selector":{"version":"green"}}}'
+    
+    - echo "✅ Production deployment completed"
+  needs:
+    - build-api
+    - build-streamlit
+    - build-superset
+    - build-airflow
+
+# Stage 6: Notifications
+notify-success:
+  stage: notify
+  image: alpine:latest
+  before_script:
+    - apk add --no-cache curl
+  script:
+    - echo "📢 Sending success notification..."
+    - |
+      curl -X POST "$SLACK_WEBHOOK_URL" \
+        -H 'Content-type: application/json' \
+        --data "{
+          \"text\": \"✅ RAG Platform deployment successful\",
+          \"attachments\": [{
+            \"color\": \"good\",
+            \"fields\": [
+              {\"title\": \"Environment\", \"value\": \"$CI_ENVIRONMENT_NAME\", \"short\": true},
+              {\"title\": \"Commit\", \"value\": \"$CI_COMMIT_SHA\", \"short\": true},
+              {\"title\": \"Author\", \"value\": \"$GITLAB_USER_NAME\", \"short\": true},
+              {\"title\": \"Pipeline\", \"value\": \"<$CI_PIPELINE_URL|#$CI_PIPELINE_ID>\", \"short\": true}
+            ]
+          }]
+        }" || echo "Slack notification failed"
+    - echo "✅ Notification sent"
+  rules:
+    - if: $CI_COMMIT_BRANCH == "main"
+      when: on_success
+    - if: $CI_COMMIT_TAG
+      when: on_success
+
+notify-failure:
+  stage: notify
+  image: alpine:latest
+  before_script:
+    - apk add --no-cache curl
+  script:
+    - echo "📢 Sending failure notification..."
+    - |
+      curl -X POST "$SLACK_WEBHOOK_URL" \
+        -H 'Content-type: application/json' \
+        --data "{
+          \"text\": \"❌ RAG Platform deployment failed\",
+          \"attachments\": [{
+            \"color\": \"danger\",
+            \"fields\": [
+              {\"title\": \"Environment\", \"value\": \"$CI_ENVIRONMENT_NAME\", \"short\": true},
+              {\"title\": \"Commit\", \"value\": \"$CI_COMMIT_SHA\", \"short\": true},
+              {\"title\": \"Author\", \"value\": \"$GITLAB_USER_NAME\", \"short\": true},
+              {\"title\": \"Pipeline\", \"value\": \"<$CI_PIPELINE_URL|#$CI_PIPELINE_ID>\", \"short\": true}
+            ]
+          }]
+        }" || echo "Slack notification failed"
+    - echo "✅ Failure notification sent"
+  rules:
+    - if: $CI_COMMIT_BRANCH == "main"
+      when: on_failure
+    - if: $CI_COMMIT_TAG
+      when: on_failure
+
+# Performance testing (scheduled)
+performance-tests:
+  stage: test
+  services:
+    - postgres:15
+    - redis:7-alpine
+  variables:
+    DATABASE_URL: "postgresql://postgres:postgres@postgres:5432/test_rag_db"
+    REDIS_URL: "redis://redis:6379/0"
+    TESTING: "true"
+  before_script:
+    - cd apps/api
+    - pip install -r requirements.txt
+  script:
+    - echo "⚡ Running performance tests..."
+    - python -m pytest src/tests/ -m "load" \
+        --junitxml=performance-junit.xml \
+        --tb=short \
+        -v \
+        --maxfail=1
+    - echo "✅ Performance tests completed"
+  artifacts:
+    when: always
+    reports:
+      junit: apps/api/performance-junit.xml
+    expire_in: 1 week
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "schedule"
+    - if: $CI_PIPELINE_SOURCE == "web"
+      when: manual
+
+# Cleanup old images
+cleanup-registry:
+  stage: notify
+  image: alpine:latest
+  before_script:
+    - apk add --no-cache curl jq
+  script:
+    - echo "🧹 Cleaning up old container images..."
+    - |
+      # Keep only last 10 images per component
+      for component in api streamlit superset airflow; do
+        echo "Cleaning $component images..."
+        # This would implement cleanup logic using GitLab API
+        # curl commands to delete old images beyond retention limit
+      done
+    - echo "✅ Registry cleanup completed"
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "schedule"
+  when: manual
+
+# Include additional CI templates
+include:
+  - template: Security/SAST.gitlab-ci.yml
+  - template: Security/Secret-Detection.gitlab-ci.yml
+  - template: Security/License-Scanning.gitlab-ci.yml

@@ -1,0 +1,48 @@
+apiVersion: v2
+name: rag-platform
+description: A Helm chart for RAG Platform - CPU-only local RAG platform with comprehensive features
+type: application
+version: 1.0.0
+appVersion: "1.0.0"
+home: https://github.com/rag-platform/rag-platform
+sources:
+  - https://github.com/rag-platform/rag-platform
+maintainers:
+  - name: RAG Platform Team
+    email: team@rag-platform.com
+keywords:
+  - rag
+  - ai
+  - machine-learning
+  - embeddings
+  - llm
+  - fastapi
+  - streamlit
+  - superset
+  - airflow
+annotations:
+  category: Machine Learning
+  licenses: MIT
+
+dependencies:
+  - name: postgresql
+    version: "^12.0.0"
+    repository: "https://charts.bitnami.com/bitnami"
+    condition: postgresql.enabled
+  - name: redis
+    version: "^18.0.0"
+    repository: "https://charts.bitnami.com/bitnami"
+    condition: redis.enabled
+  - name: clickhouse
+    version: "^3.0.0"
+    repository: "https://charts.bitnami.com/bitnami"
+    condition: clickhouse.enabled
+  - name: prometheus
+    version: "^23.0.0"
+    repository: "https://prometheus-community.github.io/helm-charts"
+    alias: kube-prometheus-stack
+    condition: monitoring.prometheus.enabled
+  - name: grafana
+    version: "^7.0.0"
+    repository: "https://grafana.github.io/helm-charts"
+    condition: monitoring.grafana.enabled

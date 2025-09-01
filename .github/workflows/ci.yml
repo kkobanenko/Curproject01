@@ -1,0 +1,415 @@
+name: 🧪 Continuous Integration
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main, develop ]
+  workflow_dispatch:
+
+env:
+  PYTHON_VERSION: '3.11'
+  NODE_VERSION: '18'
+
+jobs:
+  # Job 1: Code Quality and Security
+  code-quality:
+    name: 🔍 Code Quality & Security
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    
+    steps:
+    - name: 📥 Checkout code
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+    
+    - name: 🐍 Setup Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: ${{ env.PYTHON_VERSION }}
+        cache: 'pip'
+    
+    - name: 📦 Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r apps/api/requirements.txt
+        pip install black isort flake8 mypy bandit safety
+    
+    - name: 🖤 Code formatting check (Black)
+      run: |
+        cd apps/api
+        black --check --diff src/
+    
+    - name: 📝 Import sorting check (isort)
+      run: |
+        cd apps/api
+        isort --check-only --diff src/
+    
+    - name: 🔧 Linting (flake8)
+      run: |
+        cd apps/api
+        flake8 src/ --max-line-length=100 --extend-ignore=E203,W503
+    
+    - name: 🔒 Security check (Bandit)
+      run: |
+        cd apps/api
+        bandit -r src/ -f json -o bandit-report.json || true
+        bandit -r src/ -ll
+    
+    - name: 🛡️ Dependency security check (Safety)
+      run: |
+        cd apps/api
+        safety check --json --output safety-report.json || true
+        safety check
+    
+    - name: 📊 Upload security reports
+      uses: actions/upload-artifact@v3
+      if: always()
+      with:
+        name: security-reports
+        path: |
+          apps/api/bandit-report.json
+          apps/api/safety-report.json
+
+  # Job 2: Unit Tests
+  unit-tests:
+    name: 🔬 Unit Tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    needs: code-quality
+    
+    strategy:
+      matrix:
+        python-version: ['3.11', '3.12']
+    
+    steps:
+    - name: 📥 Checkout code
+      uses: actions/checkout@v4
+    
+    - name: 🐍 Setup Python ${{ matrix.python-version }}
+      uses: actions/setup-python@v4
+      with:
+        python-version: ${{ matrix.python-version }}
+        cache: 'pip'
+    
+    - name: 📦 Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r apps/api/requirements.txt
+    
+    - name: 🧪 Run unit tests
+      run: |
+        cd apps/api
+        python -m pytest src/tests/ -m "unit" \
+          --cov=src \
+          --cov-report=xml:coverage.xml \
+          --cov-report=html:htmlcov \
+          --cov-report=term-missing \
+          --junitxml=junit.xml \
+          --tb=short \
+          -v
+    
+    - name: 📈 Upload coverage to Codecov
+      uses: codecov/codecov-action@v3
+      with:
+        file: apps/api/coverage.xml
+        flags: unit-tests
+        name: unit-tests-${{ matrix.python-version }}
+    
+    - name: 📊 Upload test results
+      uses: actions/upload-artifact@v3
+      if: always()
+      with:
+        name: unit-test-results-${{ matrix.python-version }}
+        path: |
+          apps/api/coverage.xml
+          apps/api/htmlcov/
+          apps/api/junit.xml
+
+  # Job 3: Integration Tests
+  integration-tests:
+    name: 🔗 Integration Tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    needs: unit-tests
+    
+    services:
+      postgres:
+        image: pgvector/pgvector:pg15
+        env:
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_USER: postgres
+          POSTGRES_DB: test_rag_db
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 5432:5432
+      
+      redis:
+        image: redis:7-alpine
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 6379:6379
+      
+      clickhouse:
+        image: clickhouse/clickhouse-server:23.3
+        env:
+          CLICKHOUSE_DB: test_metrics
+          CLICKHOUSE_USER: default
+          CLICKHOUSE_PASSWORD: ""
+        ports:
+          - 8123:8123
+    
+    steps:
+    - name: 📥 Checkout code
+      uses: actions/checkout@v4
+    
+    - name: 🐍 Setup Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: ${{ env.PYTHON_VERSION }}
+        cache: 'pip'
+    
+    - name: 📦 Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r apps/api/requirements.txt
+    
+    - name: 🗄️ Setup test database
+      env:
+        DATABASE_URL: postgresql://postgres:postgres@localhost:5432/test_rag_db
+      run: |
+        cd apps/api
+        python -c "
+import asyncio
+import asyncpg
+
+async def setup_db():
+    conn = await asyncpg.connect('postgresql://postgres:postgres@localhost:5432/test_rag_db')
+    await conn.execute('CREATE EXTENSION IF NOT EXISTS vector;')
+    await conn.close()
+
+asyncio.run(setup_db())
+"
+    
+    - name: 🧪 Run integration tests
+      env:
+        DATABASE_URL: postgresql://postgres:postgres@localhost:5432/test_rag_db
+        REDIS_URL: redis://localhost:6379/0
+        CLICKHOUSE_URL: http://localhost:8123
+        TESTING: true
+      run: |
+        cd apps/api
+        python -m pytest src/tests/ -m "integration" \
+          --cov=src \
+          --cov-report=xml:integration-coverage.xml \
+          --junitxml=integration-junit.xml \
+          --tb=short \
+          -v
+    
+    - name: 📈 Upload integration coverage
+      uses: codecov/codecov-action@v3
+      with:
+        file: apps/api/integration-coverage.xml
+        flags: integration-tests
+        name: integration-tests
+    
+    - name: 📊 Upload integration test results
+      uses: actions/upload-artifact@v3
+      if: always()
+      with:
+        name: integration-test-results
+        path: |
+          apps/api/integration-coverage.xml
+          apps/api/integration-junit.xml
+
+  # Job 4: E2E Tests
+  e2e-tests:
+    name: 🎭 End-to-End Tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    needs: integration-tests
+    
+    services:
+      postgres:
+        image: pgvector/pgvector:pg15
+        env:
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_USER: postgres
+          POSTGRES_DB: e2e_rag_db
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 5432:5432
+      
+      redis:
+        image: redis:7-alpine
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 6379:6379
+    
+    steps:
+    - name: 📥 Checkout code
+      uses: actions/checkout@v4
+    
+    - name: 🐍 Setup Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: ${{ env.PYTHON_VERSION }}
+        cache: 'pip'
+    
+    - name: 📦 Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r apps/api/requirements.txt
+        pip install playwright
+    
+    - name: 🎭 Install Playwright browsers
+      run: playwright install --with-deps chromium
+    
+    - name: 🚀 Start application stack
+      env:
+        DATABASE_URL: postgresql://postgres:postgres@localhost:5432/e2e_rag_db
+        REDIS_URL: redis://localhost:6379/0
+        TESTING: true
+      run: |
+        cd apps/api
+        uvicorn src.main:app --host 0.0.0.0 --port 8081 &
+        sleep 10
+    
+    - name: 🧪 Run E2E tests
+      env:
+        DATABASE_URL: postgresql://postgres:postgres@localhost:5432/e2e_rag_db
+        REDIS_URL: redis://localhost:6379/0
+        API_BASE_URL: http://localhost:8081
+        TESTING: true
+      run: |
+        cd apps/api
+        python -m pytest src/tests/ -m "e2e" \
+          --junitxml=e2e-junit.xml \
+          --tb=short \
+          -v \
+          --maxfail=3
+    
+    - name: 📊 Upload E2E test results
+      uses: actions/upload-artifact@v3
+      if: always()
+      with:
+        name: e2e-test-results
+        path: |
+          apps/api/e2e-junit.xml
+
+  # Job 5: Performance Tests
+  performance-tests:
+    name: ⚡ Performance Tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    needs: integration-tests
+    if: github.event_name != 'pull_request'
+    
+    services:
+      postgres:
+        image: pgvector/pgvector:pg15
+        env:
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_USER: postgres
+          POSTGRES_DB: perf_rag_db
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 5432:5432
+      
+      redis:
+        image: redis:7-alpine
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 6379:6379
+    
+    steps:
+    - name: 📥 Checkout code
+      uses: actions/checkout@v4
+    
+    - name: 🐍 Setup Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: ${{ env.PYTHON_VERSION }}
+        cache: 'pip'
+    
+    - name: 📦 Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r apps/api/requirements.txt
+    
+    - name: ⚡ Run performance tests
+      env:
+        DATABASE_URL: postgresql://postgres:postgres@localhost:5432/perf_rag_db
+        REDIS_URL: redis://localhost:6379/0
+        TESTING: true
+      run: |
+        cd apps/api
+        python -m pytest src/tests/ -m "load" \
+          --junitxml=performance-junit.xml \
+          --tb=short \
+          -v \
+          --maxfail=1
+    
+    - name: 📊 Upload performance test results
+      uses: actions/upload-artifact@v3
+      if: always()
+      with:
+        name: performance-test-results
+        path: |
+          apps/api/performance-junit.xml
+
+  # Job 6: Build Status Summary
+  build-summary:
+    name: 📋 Build Summary
+    runs-on: ubuntu-latest
+    needs: [code-quality, unit-tests, integration-tests, e2e-tests]
+    if: always()
+    
+    steps:
+    - name: 📊 Check build status
+      run: |
+        echo "## 🎯 CI/CD Pipeline Results" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "| Job | Status |" >> $GITHUB_STEP_SUMMARY
+        echo "|-----|---------|" >> $GITHUB_STEP_SUMMARY
+        echo "| Code Quality | ${{ needs.code-quality.result == 'success' && '✅ Passed' || '❌ Failed' }} |" >> $GITHUB_STEP_SUMMARY
+        echo "| Unit Tests | ${{ needs.unit-tests.result == 'success' && '✅ Passed' || '❌ Failed' }} |" >> $GITHUB_STEP_SUMMARY
+        echo "| Integration Tests | ${{ needs.integration-tests.result == 'success' && '✅ Passed' || '❌ Failed' }} |" >> $GITHUB_STEP_SUMMARY
+        echo "| E2E Tests | ${{ needs.e2e-tests.result == 'success' && '✅ Passed' || '❌ Failed' }} |" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        
+        if [[ "${{ needs.code-quality.result }}" == "success" && 
+              "${{ needs.unit-tests.result }}" == "success" && 
+              "${{ needs.integration-tests.result }}" == "success" && 
+              "${{ needs.e2e-tests.result }}" == "success" ]]; then
+          echo "🎉 **All tests passed!** Ready for deployment." >> $GITHUB_STEP_SUMMARY
+          exit 0
+        else
+          echo "❌ **Some tests failed.** Please check the logs above." >> $GITHUB_STEP_SUMMARY
+          exit 1
+        fi
