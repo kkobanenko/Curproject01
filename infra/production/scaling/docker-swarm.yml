@@ -1,0 +1,420 @@
+version: '3.8'
+
+# Docker Swarm configuration for RAG Platform auto-scaling
+# This file extends the production docker-compose with swarm-specific features
+
+services:
+  # API service with auto-scaling
+  api:
+    image: ${API_IMAGE:-ghcr.io/user/rag-platform-api:latest}
+    networks:
+      - rag-network
+    environment:
+      # Database
+      DATABASE_URL: postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-rag_platform}
+      
+      # Redis
+      REDIS_URL: redis://redis:6379
+      
+      # ClickHouse  
+      CLICKHOUSE_HOST: clickhouse
+      CLICKHOUSE_PORT: 8123
+      CLICKHOUSE_DB: ${CLICKHOUSE_DB:-metrics}
+      
+      # Ollama
+      OLLAMA_BASE_URL: http://ollama:11434
+      
+      # Security
+      JWT_SECRET_KEY: ${JWT_SECRET_KEY}
+      ENCRYPTION_KEY: ${ENCRYPTION_KEY}
+      
+      # Performance
+      WORKERS: ${API_WORKERS:-4}
+      MAX_CONNECTIONS: ${API_MAX_CONNECTIONS:-100}
+      
+      # Monitoring
+      SENTRY_DSN: ${SENTRY_DSN:-}
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+      
+      # Features
+      ENABLE_ANALYTICS: "true"
+      ENABLE_CACHE: "true"
+      ENABLE_RATE_LIMITING: "true"
+    volumes:
+      - api_logs:/app/logs
+      - documents_data:/app/data/documents
+    ports:
+      - target: 8081
+        published: 8081
+        protocol: tcp
+        mode: ingress
+    deploy:
+      replicas: 3
+      placement:
+        max_replicas_per_node: 2
+        constraints:
+          - node.role == worker
+      resources:
+        limits:
+          memory: 2G
+          cpus: '2.0'
+        reservations:
+          memory: 1G
+          cpus: '1.0'
+      restart_policy:
+        condition: any
+        delay: 5s
+        max_attempts: 3
+        window: 120s
+      update_config:
+        parallelism: 1
+        delay: 10s
+        failure_action: rollback
+        monitor: 60s
+        max_failure_ratio: 0.3
+      rollback_config:
+        parallelism: 1
+        delay: 0s
+        failure_action: pause
+        monitor: 60s
+        max_failure_ratio: 0.3
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8081/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+
+  # Streamlit with load balancing
+  streamlit:
+    image: ${STREAMLIT_IMAGE:-ghcr.io/user/rag-platform-streamlit:latest}
+    networks:
+      - rag-network
+    environment:
+      API_BASE_URL: http://api:8081
+      STREAMLIT_SERVER_PORT: 8502
+      STREAMLIT_SERVER_ADDRESS: 0.0.0.0
+      STREAMLIT_BROWSER_GATHER_USAGE_STATS: false
+      STREAMLIT_SERVER_ENABLE_CORS: true
+      STREAMLIT_SERVER_ENABLE_XSRF_PROTECTION: false
+      STREAMLIT_THEME_PRIMARY_COLOR: "#1f77b4"
+      STREAMLIT_SERVER_MAX_UPLOAD_SIZE: ${STREAMLIT_MAX_UPLOAD_SIZE:-500}
+    volumes:
+      - streamlit_logs:/app/logs
+    ports:
+      - target: 8502
+        published: 8502
+        protocol: tcp
+        mode: ingress
+    deploy:
+      replicas: 2
+      placement:
+        max_replicas_per_node: 1
+        constraints:
+          - node.role == worker
+      resources:
+        limits:
+          memory: 1G
+          cpus: '1.0'
+        reservations:
+          memory: 512M
+          cpus: '0.5'
+      restart_policy:
+        condition: any
+        delay: 5s
+        max_attempts: 3
+        window: 120s
+      update_config:
+        parallelism: 1
+        delay: 10s
+        failure_action: rollback
+        monitor: 60s
+      rollback_config:
+        parallelism: 1
+        delay: 0s
+        failure_action: pause
+        monitor: 60s
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8502/_stcore/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+
+  # PostgreSQL with high availability
+  postgres:
+    image: pgvector/pgvector:pg16
+    networks:
+      - rag-network
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-rag_platform}
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_PORT: ${POSTGRES_PORT:-5432}
+      # Production optimizations
+      POSTGRES_SHARED_PRELOAD_LIBRARIES: 'pg_stat_statements'
+      POSTGRES_MAX_CONNECTIONS: ${POSTGRES_MAX_CONNECTIONS:-200}
+      POSTGRES_SHARED_BUFFERS: ${POSTGRES_SHARED_BUFFERS:-512MB}
+      POSTGRES_EFFECTIVE_CACHE_SIZE: ${POSTGRES_EFFECTIVE_CACHE_SIZE:-2GB}
+      POSTGRES_WORK_MEM: ${POSTGRES_WORK_MEM:-8MB}
+      POSTGRES_MAINTENANCE_WORK_MEM: ${POSTGRES_MAINTENANCE_WORK_MEM:-128MB}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - postgres_logs:/var/log/postgresql
+    ports:
+      - target: 5432
+        published: 5432
+        protocol: tcp
+        mode: host
+    deploy:
+      replicas: 1
+      placement:
+        constraints:
+          - node.role == manager
+          - node.labels.postgres == true
+      resources:
+        limits:
+          memory: 4G
+          cpus: '4.0'
+        reservations:
+          memory: 2G
+          cpus: '2.0'
+      restart_policy:
+        condition: any
+        delay: 10s
+        max_attempts: 3
+        window: 120s
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+
+  # Redis with clustering support
+  redis:
+    image: redis:7-alpine
+    networks:
+      - rag-network
+    command: >
+      redis-server 
+      --appendonly yes 
+      --appendfsync everysec
+      --save 900 1
+      --save 300 10
+      --save 60 10000
+      --maxmemory ${REDIS_MAX_MEMORY:-1gb}
+      --maxmemory-policy allkeys-lru
+      --tcp-keepalive 60
+      --timeout 300
+    volumes:
+      - redis_data:/data
+      - redis_logs:/var/log/redis
+    ports:
+      - target: 6379
+        published: 6379
+        protocol: tcp
+        mode: host
+    deploy:
+      replicas: 1
+      placement:
+        constraints:
+          - node.role == manager
+          - node.labels.redis == true
+      resources:
+        limits:
+          memory: 2G
+          cpus: '2.0'
+        reservations:
+          memory: 1G
+          cpus: '1.0'
+      restart_policy:
+        condition: any
+        delay: 10s
+        max_attempts: 3
+        window: 120s
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 10s
+
+  # ClickHouse for metrics
+  clickhouse:
+    image: clickhouse/clickhouse-server:23
+    networks:
+      - rag-network
+    environment:
+      CLICKHOUSE_DB: ${CLICKHOUSE_DB:-metrics}
+      CLICKHOUSE_USER: ${CLICKHOUSE_USER:-default}
+      CLICKHOUSE_PASSWORD: ${CLICKHOUSE_PASSWORD:-}
+      CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT: 1
+    volumes:
+      - clickhouse_data:/var/lib/clickhouse
+      - clickhouse_logs:/var/log/clickhouse-server
+    ports:
+      - target: 8123
+        published: 8123
+        protocol: tcp
+        mode: host
+      - target: 9000
+        published: 9000
+        protocol: tcp
+        mode: host
+    deploy:
+      replicas: 1
+      placement:
+        constraints:
+          - node.role == worker
+          - node.labels.clickhouse == true
+      resources:
+        limits:
+          memory: 8G
+          cpus: '4.0'
+        reservations:
+          memory: 4G
+          cpus: '2.0'
+      restart_policy:
+        condition: any
+        delay: 10s
+        max_attempts: 3
+        window: 120s
+    healthcheck:
+      test: ["CMD", "clickhouse-client", "--query", "SELECT 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+
+  # Ollama with GPU support and scaling
+  ollama:
+    image: ollama/ollama:latest
+    networks:
+      - rag-network
+    volumes:
+      - ollama_data:/root/.ollama
+    ports:
+      - target: 11434
+        published: 11434
+        protocol: tcp
+        mode: ingress
+    environment:
+      - OLLAMA_HOST=0.0.0.0
+      - OLLAMA_ORIGINS=*
+      - OLLAMA_KEEP_ALIVE=24h
+      - OLLAMA_NUM_PARALLEL=${OLLAMA_NUM_PARALLEL:-4}
+    deploy:
+      replicas: 2
+      placement:
+        constraints:
+          - node.labels.gpu == true
+      resources:
+        limits:
+          memory: 16G
+          cpus: '8.0'
+        reservations:
+          memory: 8G
+          cpus: '4.0'
+      restart_policy:
+        condition: any
+        delay: 30s
+        max_attempts: 3
+        window: 120s
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:11434/api/tags"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
+
+  # Nginx Load Balancer
+  nginx:
+    image: nginx:alpine
+    networks:
+      - rag-network
+    volumes:
+      - ./nginx/nginx.swarm.conf:/etc/nginx/nginx.conf:ro
+      - ./nginx/ssl:/etc/nginx/ssl:ro
+      - nginx_logs:/var/log/nginx
+    ports:
+      - target: 80
+        published: 80
+        protocol: tcp
+        mode: ingress
+      - target: 443
+        published: 443
+        protocol: tcp
+        mode: ingress
+    deploy:
+      replicas: 2
+      placement:
+        constraints:
+          - node.role == worker
+      resources:
+        limits:
+          memory: 1G
+          cpus: '1.0'
+        reservations:
+          memory: 512M
+          cpus: '0.5'
+      restart_policy:
+        condition: any
+        delay: 5s
+        max_attempts: 3
+        window: 120s
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+networks:
+  rag-network:
+    driver: overlay
+    attachable: true
+    ipam:
+      config:
+        - subnet: 10.0.1.0/24
+
+volumes:
+  postgres_data:
+    driver: local
+  postgres_logs:
+    driver: local
+  redis_data:
+    driver: local
+  redis_logs:
+    driver: local
+  clickhouse_data:
+    driver: local
+  clickhouse_logs:
+    driver: local
+  ollama_data:
+    driver: local
+  api_logs:
+    driver: local
+  streamlit_logs:
+    driver: local
+  nginx_logs:
+    driver: local
+  documents_data:
+    driver: local
+
+# Swarm deployment configs
+configs:
+  nginx_swarm_config:
+    file: ./nginx/nginx.swarm.conf
+  prometheus_config:
+    file: ./monitoring/prometheus.yml
+
+# Secrets for production
+secrets:
+  postgres_password:
+    external: true
+  jwt_secret:
+    external: true
+  encryption_key:
+    external: true
+  redis_password:
+    external: true

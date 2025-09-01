@@ -1,0 +1,422 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: rag-platform
+  labels:
+    name: rag-platform
+
+---
+# Horizontal Pod Autoscaler for API
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: api-hpa
+  namespace: rag-platform
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: api
+  minReplicas: 2
+  maxReplicas: 10
+  metrics:
+  - type: Resource
+    resource:
+      name: cpu
+      target:
+        type: Utilization
+        averageUtilization: 70
+  - type: Resource
+    resource:
+      name: memory
+      target:
+        type: Utilization
+        averageUtilization: 80
+  - type: Pods
+    pods:
+      metric:
+        name: http_requests_per_second
+      target:
+        type: AverageValue
+        averageValue: "100"
+  behavior:
+    scaleDown:
+      stabilizationWindowSeconds: 300
+      policies:
+      - type: Percent
+        value: 50
+        periodSeconds: 60
+    scaleUp:
+      stabilizationWindowSeconds: 60
+      policies:
+      - type: Percent
+        value: 100
+        periodSeconds: 30
+      - type: Pods
+        value: 2
+        periodSeconds: 60
+
+---
+# HPA for Streamlit
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: streamlit-hpa
+  namespace: rag-platform
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: streamlit
+  minReplicas: 2
+  maxReplicas: 6
+  metrics:
+  - type: Resource
+    resource:
+      name: cpu
+      target:
+        type: Utilization
+        averageUtilization: 75
+  - type: Resource
+    resource:
+      name: memory
+      target:
+        type: Utilization
+        averageUtilization: 85
+  behavior:
+    scaleDown:
+      stabilizationWindowSeconds: 300
+      policies:
+      - type: Percent
+        value: 25
+        periodSeconds: 60
+    scaleUp:
+      stabilizationWindowSeconds: 30
+      policies:
+      - type: Pods
+        value: 1
+        periodSeconds: 30
+
+---
+# HPA for Ollama (GPU instances)
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: ollama-hpa
+  namespace: rag-platform
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: ollama
+  minReplicas: 1
+  maxReplicas: 4
+  metrics:
+  - type: Resource
+    resource:
+      name: cpu
+      target:
+        type: Utilization
+        averageUtilization: 80
+  - type: Resource
+    resource:
+      name: memory
+      target:
+        type: Utilization
+        averageUtilization: 90
+  - type: Pods
+    pods:
+      metric:
+        name: embedding_requests_per_second
+      target:
+        type: AverageValue
+        averageValue: "50"
+  behavior:
+    scaleDown:
+      stabilizationWindowSeconds: 600  # Longer stabilization for GPU instances
+      policies:
+      - type: Pods
+        value: 1
+        periodSeconds: 120
+    scaleUp:
+      stabilizationWindowSeconds: 120
+      policies:
+      - type: Pods
+        value: 1
+        periodSeconds: 60
+
+---
+# Vertical Pod Autoscaler for PostgreSQL
+apiVersion: autoscaling.k8s.io/v1
+kind: VerticalPodAutoscaler
+metadata:
+  name: postgres-vpa
+  namespace: rag-platform
+spec:
+  targetRef:
+    apiVersion: apps/v1
+    kind: StatefulSet
+    name: postgres
+  updatePolicy:
+    updateMode: "Auto"
+  resourcePolicy:
+    containerPolicies:
+    - containerName: postgres
+      minAllowed:
+        cpu: 1000m
+        memory: 2Gi
+      maxAllowed:
+        cpu: 8000m
+        memory: 16Gi
+      controlledResources: ["cpu", "memory"]
+
+---
+# VPA for Redis
+apiVersion: autoscaling.k8s.io/v1
+kind: VerticalPodAutoscaler
+metadata:
+  name: redis-vpa
+  namespace: rag-platform
+spec:
+  targetRef:
+    apiVersion: apps/v1
+    kind: StatefulSet
+    name: redis
+  updatePolicy:
+    updateMode: "Auto"
+  resourcePolicy:
+    containerPolicies:
+    - containerName: redis
+      minAllowed:
+        cpu: 500m
+        memory: 1Gi
+      maxAllowed:
+        cpu: 4000m
+        memory: 8Gi
+      controlledResources: ["cpu", "memory"]
+
+---
+# VPA for ClickHouse
+apiVersion: autoscaling.k8s.io/v1
+kind: VerticalPodAutoscaler
+metadata:
+  name: clickhouse-vpa
+  namespace: rag-platform
+spec:
+  targetRef:
+    apiVersion: apps/v1
+    kind: StatefulSet
+    name: clickhouse
+  updatePolicy:
+    updateMode: "Auto"
+  resourcePolicy:
+    containerPolicies:
+    - containerName: clickhouse
+      minAllowed:
+        cpu: 2000m
+        memory: 4Gi
+      maxAllowed:
+        cpu: 16000m
+        memory: 32Gi
+      controlledResources: ["cpu", "memory"]
+
+---
+# Pod Disruption Budget for API
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: api-pdb
+  namespace: rag-platform
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app: api
+
+---
+# PDB for Streamlit
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: streamlit-pdb
+  namespace: rag-platform
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app: streamlit
+
+---
+# Custom Metrics API for advanced scaling
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: custom-metrics-config
+  namespace: rag-platform
+data:
+  config.yaml: |
+    rules:
+    - seriesQuery: 'http_requests_total{namespace!="",pod!=""}'
+      resources:
+        overrides:
+          namespace: {resource: "namespace"}
+          pod: {resource: "pod"}
+      name:
+        matches: "^(.*)_total"
+        as: "${1}_per_second"
+      metricsQuery: 'rate(<<.Series>>{<<.LabelMatchers>>}[1m])'
+    
+    - seriesQuery: 'rag_queries_total{namespace!="",pod!=""}'
+      resources:
+        overrides:
+          namespace: {resource: "namespace"}
+          pod: {resource: "pod"}
+      name:
+        matches: "^(.*)_total"
+        as: "${1}_per_second"
+      metricsQuery: 'rate(<<.Series>>{<<.LabelMatchers>>}[1m])'
+    
+    - seriesQuery: 'embedding_generation_duration_seconds{namespace!="",pod!=""}'
+      resources:
+        overrides:
+          namespace: {resource: "namespace"}
+          pod: {resource: "pod"}
+      name:
+        matches: "^(.*)_seconds"
+        as: "${1}_average"
+      metricsQuery: 'avg(<<.Series>>{<<.LabelMatchers>>})'
+
+---
+# KEDA ScaledObject for advanced autoscaling based on queue length
+apiVersion: keda.sh/v1alpha1
+kind: ScaledObject
+metadata:
+  name: document-processing-scaler
+  namespace: rag-platform
+spec:
+  scaleTargetRef:
+    name: api
+  pollingInterval: 30
+  cooldownPeriod: 300
+  minReplicaCount: 2
+  maxReplicaCount: 15
+  triggers:
+  - type: redis
+    metadata:
+      address: redis:6379
+      listName: document_processing_queue
+      listLength: '10'  # Scale up when queue has more than 10 items
+  - type: prometheus
+    metadata:
+      serverAddress: http://prometheus:9090
+      metricName: rag_queries_per_second
+      threshold: '100'
+      query: rate(rag_queries_total[1m])
+
+---
+# KEDA ScaledObject for Ollama based on inference queue
+apiVersion: keda.sh/v1alpha1
+kind: ScaledObject
+metadata:
+  name: ollama-inference-scaler
+  namespace: rag-platform
+spec:
+  scaleTargetRef:
+    name: ollama
+  pollingInterval: 15
+  cooldownPeriod: 600  # Longer cooldown for GPU resources
+  minReplicaCount: 1
+  maxReplicaCount: 6
+  triggers:
+  - type: prometheus
+    metadata:
+      serverAddress: http://prometheus:9090
+      metricName: ollama_queue_length
+      threshold: '5'
+      query: ollama_inference_queue_size
+  - type: prometheus
+    metadata:
+      serverAddress: http://prometheus:9090
+      metricName: embedding_requests_per_second
+      threshold: '20'
+      query: rate(embedding_requests_total[1m])
+
+---
+# Priority Classes for different workloads
+apiVersion: scheduling.k8s.io/v1
+kind: PriorityClass
+metadata:
+  name: rag-platform-critical
+value: 1000
+globalDefault: false
+description: "Critical RAG platform services"
+
+---
+apiVersion: scheduling.k8s.io/v1
+kind: PriorityClass
+metadata:
+  name: rag-platform-high
+value: 800
+globalDefault: false
+description: "High priority RAG platform services"
+
+---
+apiVersion: scheduling.k8s.io/v1
+kind: PriorityClass
+metadata:
+  name: rag-platform-normal
+value: 500
+globalDefault: false
+description: "Normal priority RAG platform services"
+
+---
+# Resource Quotas for the namespace
+apiVersion: v1
+kind: ResourceQuota
+metadata:
+  name: rag-platform-quota
+  namespace: rag-platform
+spec:
+  hard:
+    requests.cpu: "20"
+    requests.memory: 40Gi
+    limits.cpu: "100"
+    limits.memory: 200Gi
+    persistentvolumeclaims: "20"
+    pods: "50"
+    services: "20"
+    secrets: "30"
+    configmaps: "30"
+
+---
+# Network Policy for security
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: rag-platform-network-policy
+  namespace: rag-platform
+spec:
+  podSelector: {}
+  policyTypes:
+  - Ingress
+  - Egress
+  ingress:
+  - from:
+    - namespaceSelector:
+        matchLabels:
+          name: rag-platform
+    - namespaceSelector:
+        matchLabels:
+          name: ingress-nginx
+  - from: []
+    ports:
+    - protocol: TCP
+      port: 8081  # API
+    - protocol: TCP
+      port: 8502  # Streamlit
+    - protocol: TCP
+      port: 9090  # Prometheus
+    - protocol: TCP
+      port: 3000  # Grafana
+  egress:
+  - {}  # Allow all egress (can be restricted as needed)
