@@ -23,4 +23,4 @@ Service Ports (default values for current deployment):
 - ClickHouse: 8124 (HTTP), 9001 (native)
 - Ollama: 11434
 - Airflow: 8080 (when enabled)
-- Superset: 8088 (when enabled)
+- Superset: 8090 (when enabled)
