@@ -1,12 +1,14 @@
 """
-Middleware для аутентификации и авторизации
+Middleware для аутентификации и авторизации с аудитом
 """
 from fastapi import Request, HTTPException, status, Depends
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from typing import Optional
 import logging
+import time
 
 from ..services.auth import AuthService
+from ..services.audit import AuditService, AuditAction, AuditLevel
 from ..schemas.auth import UserContext, Permission, User
 
 logger = logging.getLogger(__name__)
@@ -31,7 +33,7 @@ class AuthMiddleware:
     
     async def __call__(self, request: Request) -> Optional[UserContext]:
         """
-        Обработка запроса
+        Обработка запроса с аудитом
         
         Args:
             request: FastAPI запрос
@@ -39,6 +41,10 @@ class AuthMiddleware:
         Returns:
             Контекст пользователя или None
         """
+        start_time = time.time()
+        ip_address = self._get_client_ip(request)
+        user_agent = request.headers.get("User-Agent", "Unknown")
+        
         # Если аутентификация не требуется, пропускаем
         if not self.require_auth:
             return None
@@ -46,6 +52,17 @@ class AuthMiddleware:
         # Получаем токен из заголовка
         token = await self._extract_token(request)
         if not token:
+            # Логируем попытку доступа без токена
+            AuditService.log_action(
+                action=AuditAction.UNAUTHORIZED_ACCESS,
+                level=AuditLevel.WARNING,
+                ip_address=ip_address,
+                user_agent=user_agent,
+                success=False,
+                error_message="Токен доступа не предоставлен",
+                details={"endpoint": str(request.url)}
+            )
+            
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail="Токен доступа не предоставлен",
@@ -55,7 +72,18 @@ class AuthMiddleware:
         # Проверяем токен и получаем контекст пользователя
         try:
             user_context = AuthService.get_user_context_from_token(token)
-        except HTTPException:
+        except HTTPException as e:
+            # Логируем неудачную аутентификацию
+            AuditService.log_action(
+                action=AuditAction.UNAUTHORIZED_ACCESS,
+                level=AuditLevel.WARNING,
+                ip_address=ip_address,
+                user_agent=user_agent,
+                success=False,
+                error_message="Неверный или истекший токен",
+                details={"endpoint": str(request.url), "token_prefix": token[:10] + "..."}
+            )
+            
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail="Неверный или истекший токен",
@@ -66,6 +94,22 @@ class AuthMiddleware:
         if self.required_permissions:
             for permission in self.required_permissions:
                 if not AuthService.check_permission(user_context, permission):
+                    # Логируем нарушение прав доступа
+                    AuditService.log_action(
+                        action=AuditAction.UNAUTHORIZED_ACCESS,
+                        level=AuditLevel.SECURITY,
+                        user_context=user_context,
+                        ip_address=ip_address,
+                        user_agent=user_agent,
+                        success=False,
+                        error_message=f"Недостаточно прав. Требуется разрешение: {permission}",
+                        details={
+                            "endpoint": str(request.url),
+                            "required_permission": permission,
+                            "user_permissions": user_context.permissions
+                        }
+                    )
+                    
                     raise HTTPException(
                         status_code=status.HTTP_403_FORBIDDEN,
                         detail=f"Недостаточно прав. Требуется разрешение: {permission}"
@@ -73,9 +117,11 @@ class AuthMiddleware:
         
         # Сохраняем контекст пользователя в запросе
         request.state.user = user_context
+        request.state.auth_start_time = start_time
         
         # Логируем успешную аутентификацию
-        logger.info(f"Пользователь {user_context.username} (ID: {user_context.user_id}) аутентифицирован")
+        auth_time = (time.time() - start_time) * 1000  # в миллисекундах
+        logger.info(f"Пользователь {user_context.username} (ID: {user_context.user_id}) аутентифицирован за {auth_time:.2f}мс")
         
         return user_context
     
@@ -92,6 +138,20 @@ class AuthMiddleware:
             return token
         
         return None
+    
+    def _get_client_ip(self, request: Request) -> str:
+        """Получение IP адреса клиента"""
+        # Проверяем заголовки прокси
+        forwarded_for = request.headers.get("X-Forwarded-For")
+        if forwarded_for:
+            return forwarded_for.split(",")[0].strip()
+        
+        real_ip = request.headers.get("X-Real-IP")
+        if real_ip:
+            return real_ip
+        
+        # Возвращаем прямой IP
+        return request.client.host if request.client else "unknown"
 
 
 async def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(security)) -> User:
