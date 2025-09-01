@@ -1,0 +1,1296 @@
+openapi: 3.0.3
+info:
+  title: RAG Platform API
+  description: |
+    # RAG Platform API Documentation
+    
+    Comprehensive API for a local CPU-only RAG (Retrieval-Augmented Generation) platform.
+    
+    ## Features
+    - 🔍 **Semantic Search**: Advanced vector-based document search
+    - 🤖 **RAG Answers**: AI-powered question answering with source citations
+    - 📄 **Document Management**: Upload, process, and manage documents
+    - 👥 **User Management**: Role-based access control and authentication
+    - 📊 **Analytics**: Performance metrics and usage analytics
+    - 🔧 **Administration**: System configuration and monitoring
+    
+    ## Authentication
+    This API uses JWT (JSON Web Token) authentication. Include the token in the Authorization header:
+    ```
+    Authorization: Bearer <your-jwt-token>
+    ```
+    
+    ## Rate Limiting
+    - **Authenticated users**: 1000 requests per hour
+    - **Guest users**: 100 requests per hour
+    
+    ## Error Handling
+    The API uses standard HTTP status codes and returns detailed error information in JSON format.
+    
+    ## Versioning
+    API version is included in the URL path: `/api/v1/`
+    
+  version: 1.0.0
+  contact:
+    name: RAG Platform Team
+    email: team@rag-platform.com
+    url: https://rag-platform.com
+  license:
+    name: MIT
+    url: https://opensource.org/licenses/MIT
+  termsOfService: https://rag-platform.com/terms
+
+servers:
+  - url: https://api.rag-platform.com/api/v1
+    description: Production server
+  - url: https://staging-api.rag-platform.com/api/v1
+    description: Staging server
+  - url: http://localhost:8081/api/v1
+    description: Local development server
+
+tags:
+  - name: Authentication
+    description: User authentication and authorization
+  - name: Documents
+    description: Document upload, management, and processing
+  - name: Search
+    description: Semantic and keyword search functionality
+  - name: RAG
+    description: Retrieval-Augmented Generation answers
+  - name: Users
+    description: User management and profiles
+  - name: Analytics
+    description: Usage analytics and metrics
+  - name: Administration
+    description: System administration and configuration
+  - name: Health
+    description: System health and monitoring
+
+paths:
+  # Authentication Endpoints
+  /auth/login:
+    post:
+      tags: [Authentication]
+      summary: User login
+      description: Authenticate user with username/email and password
+      operationId: loginUser
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LoginRequest'
+            examples:
+              username_login:
+                summary: Login with username
+                value:
+                  username: "john_doe"
+                  password: "secure_password123"
+              email_login:
+                summary: Login with email
+                value:
+                  email: "john@example.com"
+                  password: "secure_password123"
+      responses:
+        '200':
+          description: Login successful
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LoginResponse'
+              examples:
+                successful_login:
+                  summary: Successful login response
+                  value:
+                    access_token: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
+                    token_type: "bearer"
+                    expires_in: 3600
+                    user:
+                      id: 123
+                      username: "john_doe"
+                      email: "john@example.com"
+                      role: "user"
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+
+  /auth/register:
+    post:
+      tags: [Authentication]
+      summary: User registration
+      description: Register a new user account
+      operationId: registerUser
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RegisterRequest'
+      responses:
+        '201':
+          description: User created successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserResponse'
+        '400':
+          $ref: '#/components/responses/BadRequestError'
+        '409':
+          description: User already exists
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /auth/refresh:
+    post:
+      tags: [Authentication]
+      summary: Refresh access token
+      description: Get a new access token using refresh token
+      operationId: refreshToken
+      security:
+        - BearerAuth: []
+      responses:
+        '200':
+          description: Token refreshed successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TokenResponse'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+
+  # Document Management Endpoints
+  /documents:
+    get:
+      tags: [Documents]
+      summary: List user documents
+      description: Get paginated list of user's documents with optional filtering
+      operationId: getDocuments
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: page
+          in: query
+          description: Page number (1-based)
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            default: 1
+        - name: limit
+          in: query
+          description: Number of items per page
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 20
+        - name: search
+          in: query
+          description: Search query for document titles
+          required: false
+          schema:
+            type: string
+        - name: content_type
+          in: query
+          description: Filter by content type
+          required: false
+          schema:
+            type: string
+            enum: [pdf, docx, txt, html, xlsx]
+        - name: sort_by
+          in: query
+          description: Sort field
+          required: false
+          schema:
+            type: string
+            enum: [created_at, updated_at, title, size]
+            default: created_at
+        - name: sort_order
+          in: query
+          description: Sort order
+          required: false
+          schema:
+            type: string
+            enum: [asc, desc]
+            default: desc
+      responses:
+        '200':
+          description: Documents retrieved successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DocumentListResponse'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+
+    post:
+      tags: [Documents]
+      summary: Upload document
+      description: Upload a new document for processing
+      operationId: uploadDocument
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              properties:
+                file:
+                  type: string
+                  format: binary
+                  description: Document file to upload
+                title:
+                  type: string
+                  description: Optional custom title for the document
+                tags:
+                  type: array
+                  items:
+                    type: string
+                  description: Optional tags for categorization
+                metadata:
+                  type: object
+                  description: Additional metadata as JSON
+              required:
+                - file
+            encoding:
+              file:
+                contentType: application/pdf, application/vnd.openxmlformats-officedocument.wordprocessingml.document, text/plain, text/html, application/vnd.openxmlformats-officedocument.spreadsheetml.sheet
+      responses:
+        '201':
+          description: Document uploaded successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DocumentResponse'
+        '400':
+          $ref: '#/components/responses/BadRequestError'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '413':
+          description: File too large
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /documents/{document_id}:
+    get:
+      tags: [Documents]
+      summary: Get document details
+      description: Retrieve detailed information about a specific document
+      operationId: getDocument
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: document_id
+          in: path
+          required: true
+          description: Document UUID
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Document details retrieved successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DocumentDetailResponse'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '404':
+          $ref: '#/components/responses/NotFoundError'
+
+    put:
+      tags: [Documents]
+      summary: Update document
+      description: Update document metadata and tags
+      operationId: updateDocument
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: document_id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DocumentUpdateRequest'
+      responses:
+        '200':
+          description: Document updated successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DocumentResponse'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '404':
+          $ref: '#/components/responses/NotFoundError'
+
+    delete:
+      tags: [Documents]
+      summary: Delete document
+      description: Permanently delete a document and its associated data
+      operationId: deleteDocument
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: document_id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Document deleted successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SuccessResponse'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '404':
+          $ref: '#/components/responses/NotFoundError'
+
+  # Search Endpoints
+  /search/semantic:
+    post:
+      tags: [Search]
+      summary: Semantic search
+      description: Perform vector-based semantic search across documents
+      operationId: semanticSearch
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SemanticSearchRequest'
+            examples:
+              basic_search:
+                summary: Basic semantic search
+                value:
+                  query: "machine learning algorithms"
+                  limit: 10
+              advanced_search:
+                summary: Advanced search with filters
+                value:
+                  query: "deep learning neural networks"
+                  limit: 20
+                  filters:
+                    content_type: ["pdf", "docx"]
+                    date_from: "2024-01-01"
+                    date_to: "2024-12-31"
+                    tags: ["AI", "research"]
+                  threshold: 0.7
+      responses:
+        '200':
+          description: Search completed successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SearchResponse'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+
+  /search/keyword:
+    post:
+      tags: [Search]
+      summary: Keyword search
+      description: Perform traditional keyword-based search
+      operationId: keywordSearch
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/KeywordSearchRequest'
+      responses:
+        '200':
+          description: Search completed successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SearchResponse'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+
+  /search/history:
+    get:
+      tags: [Search]
+      summary: Get search history
+      description: Retrieve user's search history with pagination
+      operationId: getSearchHistory
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: page
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            default: 1
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 20
+      responses:
+        '200':
+          description: Search history retrieved successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SearchHistoryResponse'
+
+  # RAG Endpoints
+  /answers/rag:
+    post:
+      tags: [RAG]
+      summary: Generate RAG answer
+      description: Generate AI-powered answer using retrieved document context
+      operationId: generateRAGAnswer
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RAGRequest'
+            examples:
+              basic_question:
+                summary: Basic question
+                value:
+                  question: "What are the main benefits of machine learning?"
+                  context_limit: 5
+                  include_sources: true
+              detailed_question:
+                summary: Detailed question with filters
+                value:
+                  question: "How do neural networks work in practice?"
+                  context_limit: 10
+                  include_sources: true
+                  filters:
+                    content_type: ["pdf"]
+                    tags: ["neural-networks", "deep-learning"]
+                  model_params:
+                    temperature: 0.7
+                    max_tokens: 500
+      responses:
+        '200':
+          description: Answer generated successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RAGResponse'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+
+  # Health and Monitoring
+  /health:
+    get:
+      tags: [Health]
+      summary: Health check
+      description: Check the health status of the API and dependent services
+      operationId: healthCheck
+      responses:
+        '200':
+          description: Service is healthy
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HealthResponse'
+        '503':
+          description: Service unavailable
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HealthResponse'
+
+  /metrics:
+    get:
+      tags: [Analytics]
+      summary: Get usage metrics
+      description: Retrieve usage analytics and performance metrics
+      operationId: getMetrics
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: period
+          in: query
+          description: Time period for metrics
+          schema:
+            type: string
+            enum: [hour, day, week, month]
+            default: day
+        - name: metric_type
+          in: query
+          description: Type of metrics to retrieve
+          schema:
+            type: string
+            enum: [usage, performance, errors]
+      responses:
+        '200':
+          description: Metrics retrieved successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MetricsResponse'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+
+components:
+  securitySchemes:
+    BearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: JWT token obtained from /auth/login endpoint
+
+  schemas:
+    # Authentication Schemas
+    LoginRequest:
+      type: object
+      required: [password]
+      properties:
+        username:
+          type: string
+          description: Username (required if email not provided)
+          example: "john_doe"
+        email:
+          type: string
+          format: email
+          description: Email address (required if username not provided)
+          example: "john@example.com"
+        password:
+          type: string
+          format: password
+          minLength: 8
+          description: User password
+          example: "secure_password123"
+      oneOf:
+        - required: [username, password]
+        - required: [email, password]
+
+    RegisterRequest:
+      type: object
+      required: [username, email, password, full_name]
+      properties:
+        username:
+          type: string
+          pattern: '^[a-zA-Z0-9_-]{3,30}$'
+          description: Unique username
+          example: "john_doe"
+        email:
+          type: string
+          format: email
+          description: Email address
+          example: "john@example.com"
+        password:
+          type: string
+          format: password
+          minLength: 8
+          description: Password (minimum 8 characters)
+          example: "secure_password123"
+        full_name:
+          type: string
+          minLength: 2
+          maxLength: 100
+          description: User's full name
+          example: "John Doe"
+        organization:
+          type: string
+          description: Optional organization name
+          example: "ACME Corp"
+
+    LoginResponse:
+      type: object
+      properties:
+        access_token:
+          type: string
+          description: JWT access token
+          example: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
+        token_type:
+          type: string
+          example: "bearer"
+        expires_in:
+          type: integer
+          description: Token expiration time in seconds
+          example: 3600
+        user:
+          $ref: '#/components/schemas/User'
+
+    TokenResponse:
+      type: object
+      properties:
+        access_token:
+          type: string
+          description: New JWT access token
+        token_type:
+          type: string
+          example: "bearer"
+        expires_in:
+          type: integer
+          description: Token expiration time in seconds
+
+    User:
+      type: object
+      properties:
+        id:
+          type: integer
+          description: User ID
+          example: 123
+        username:
+          type: string
+          description: Username
+          example: "john_doe"
+        email:
+          type: string
+          format: email
+          description: Email address
+          example: "john@example.com"
+        full_name:
+          type: string
+          description: Full name
+          example: "John Doe"
+        role:
+          type: string
+          enum: [super_admin, admin, user, viewer, readonly, guest]
+          description: User role
+          example: "user"
+        organization:
+          type: string
+          description: Organization name
+          example: "ACME Corp"
+        is_active:
+          type: boolean
+          description: Account status
+          example: true
+        created_at:
+          type: string
+          format: date-time
+          description: Account creation timestamp
+        last_login:
+          type: string
+          format: date-time
+          description: Last login timestamp
+
+    # Document Schemas
+    Document:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+          description: Document UUID
+          example: "123e4567-e89b-12d3-a456-426614174000"
+        title:
+          type: string
+          description: Document title
+          example: "Machine Learning Fundamentals"
+        filename:
+          type: string
+          description: Original filename
+          example: "ml-fundamentals.pdf"
+        content_type:
+          type: string
+          description: MIME type
+          example: "application/pdf"
+        size_bytes:
+          type: integer
+          description: File size in bytes
+          example: 2048576
+        status:
+          type: string
+          enum: [uploading, processing, completed, failed]
+          description: Processing status
+          example: "completed"
+        chunks_count:
+          type: integer
+          description: Number of processed chunks
+          example: 42
+        tags:
+          type: array
+          items:
+            type: string
+          description: Document tags
+          example: ["AI", "machine-learning", "tutorial"]
+        metadata:
+          type: object
+          description: Additional metadata
+          example:
+            author: "John Smith"
+            pages: 120
+            language: "en"
+        created_at:
+          type: string
+          format: date-time
+          description: Upload timestamp
+        updated_at:
+          type: string
+          format: date-time
+          description: Last update timestamp
+        processing_completed_at:
+          type: string
+          format: date-time
+          description: Processing completion timestamp
+
+    DocumentUpdateRequest:
+      type: object
+      properties:
+        title:
+          type: string
+          description: New document title
+        tags:
+          type: array
+          items:
+            type: string
+          description: Updated tags
+        metadata:
+          type: object
+          description: Updated metadata
+
+    DocumentListResponse:
+      type: object
+      properties:
+        documents:
+          type: array
+          items:
+            $ref: '#/components/schemas/Document'
+        pagination:
+          $ref: '#/components/schemas/Pagination'
+
+    DocumentDetailResponse:
+      allOf:
+        - $ref: '#/components/schemas/Document'
+        - type: object
+          properties:
+            chunks:
+              type: array
+              items:
+                $ref: '#/components/schemas/DocumentChunk'
+              description: Document chunks (if requested)
+            processing_log:
+              type: array
+              items:
+                type: object
+                properties:
+                  timestamp:
+                    type: string
+                    format: date-time
+                  status:
+                    type: string
+                  message:
+                    type: string
+
+    DocumentChunk:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+          description: Chunk UUID
+        chunk_index:
+          type: integer
+          description: Chunk position in document
+        content:
+          type: string
+          description: Chunk text content
+        content_type:
+          type: string
+          enum: [text, table, image]
+          description: Type of content
+        metadata:
+          type: object
+          description: Chunk metadata
+          example:
+            page: 1
+            section: "Introduction"
+
+    # Search Schemas
+    SemanticSearchRequest:
+      type: object
+      required: [query]
+      properties:
+        query:
+          type: string
+          minLength: 1
+          maxLength: 1000
+          description: Search query
+          example: "machine learning algorithms"
+        limit:
+          type: integer
+          minimum: 1
+          maximum: 100
+          default: 10
+          description: Maximum number of results
+        threshold:
+          type: number
+          minimum: 0
+          maximum: 1
+          default: 0.7
+          description: Minimum similarity threshold
+        filters:
+          $ref: '#/components/schemas/SearchFilters'
+
+    KeywordSearchRequest:
+      type: object
+      required: [query]
+      properties:
+        query:
+          type: string
+          minLength: 1
+          maxLength: 1000
+          description: Keyword search query
+        limit:
+          type: integer
+          minimum: 1
+          maximum: 100
+          default: 10
+        filters:
+          $ref: '#/components/schemas/SearchFilters'
+
+    SearchFilters:
+      type: object
+      properties:
+        content_type:
+          type: array
+          items:
+            type: string
+            enum: [pdf, docx, txt, html, xlsx]
+          description: Filter by content types
+        date_from:
+          type: string
+          format: date
+          description: Start date filter
+        date_to:
+          type: string
+          format: date
+          description: End date filter
+        tags:
+          type: array
+          items:
+            type: string
+          description: Filter by tags
+        document_ids:
+          type: array
+          items:
+            type: string
+            format: uuid
+          description: Search within specific documents
+
+    SearchResult:
+      type: object
+      properties:
+        chunk_id:
+          type: string
+          format: uuid
+          description: Chunk UUID
+        document_id:
+          type: string
+          format: uuid
+          description: Source document UUID
+        content:
+          type: string
+          description: Matching text content
+        score:
+          type: number
+          minimum: 0
+          maximum: 1
+          description: Relevance score
+        metadata:
+          type: object
+          description: Chunk and document metadata
+        highlights:
+          type: array
+          items:
+            type: string
+          description: Highlighted matching text segments
+
+    SearchResponse:
+      type: object
+      properties:
+        results:
+          type: array
+          items:
+            $ref: '#/components/schemas/SearchResult'
+        total:
+          type: integer
+          description: Total number of matching results
+        query_time_ms:
+          type: number
+          description: Query execution time in milliseconds
+        query:
+          type: string
+          description: Original search query
+
+    SearchHistoryResponse:
+      type: object
+      properties:
+        searches:
+          type: array
+          items:
+            $ref: '#/components/schemas/SearchHistoryItem'
+        pagination:
+          $ref: '#/components/schemas/Pagination'
+
+    SearchHistoryItem:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        query:
+          type: string
+          description: Search query
+        search_type:
+          type: string
+          enum: [semantic, keyword]
+        results_count:
+          type: integer
+          description: Number of results returned
+        created_at:
+          type: string
+          format: date-time
+
+    # RAG Schemas
+    RAGRequest:
+      type: object
+      required: [question]
+      properties:
+        question:
+          type: string
+          minLength: 10
+          maxLength: 2000
+          description: Question to answer
+          example: "What are the main benefits of using machine learning?"
+        context_limit:
+          type: integer
+          minimum: 1
+          maximum: 20
+          default: 5
+          description: Maximum number of context chunks to use
+        include_sources:
+          type: boolean
+          default: true
+          description: Include source references in response
+        filters:
+          $ref: '#/components/schemas/SearchFilters'
+        model_params:
+          type: object
+          properties:
+            temperature:
+              type: number
+              minimum: 0
+              maximum: 2
+              default: 0.7
+              description: Model creativity (0=focused, 2=creative)
+            max_tokens:
+              type: integer
+              minimum: 50
+              maximum: 2000
+              default: 500
+              description: Maximum response length
+
+    RAGResponse:
+      type: object
+      properties:
+        answer:
+          type: string
+          description: Generated answer
+        sources:
+          type: array
+          items:
+            $ref: '#/components/schemas/RAGSource'
+          description: Source references used for the answer
+        confidence_score:
+          type: number
+          minimum: 0
+          maximum: 1
+          description: Answer confidence score
+        processing_time_ms:
+          type: number
+          description: Processing time in milliseconds
+        model_used:
+          type: string
+          description: LLM model used for generation
+
+    RAGSource:
+      type: object
+      properties:
+        chunk_id:
+          type: string
+          format: uuid
+        document_id:
+          type: string
+          format: uuid
+        document_title:
+          type: string
+        content:
+          type: string
+          description: Relevant excerpt from the source
+        relevance_score:
+          type: number
+          minimum: 0
+          maximum: 1
+        page_number:
+          type: integer
+          description: Page number (if applicable)
+
+    # Utility Schemas
+    Pagination:
+      type: object
+      properties:
+        page:
+          type: integer
+          description: Current page number
+        limit:
+          type: integer
+          description: Items per page
+        total:
+          type: integer
+          description: Total number of items
+        total_pages:
+          type: integer
+          description: Total number of pages
+        has_next:
+          type: boolean
+          description: Whether there are more pages
+        has_prev:
+          type: boolean
+          description: Whether there are previous pages
+
+    HealthResponse:
+      type: object
+      properties:
+        status:
+          type: string
+          enum: [healthy, degraded, unhealthy]
+          description: Overall system status
+        timestamp:
+          type: string
+          format: date-time
+        version:
+          type: string
+          description: API version
+        services:
+          type: object
+          properties:
+            database:
+              $ref: '#/components/schemas/ServiceStatus'
+            redis:
+              $ref: '#/components/schemas/ServiceStatus'
+            ollama:
+              $ref: '#/components/schemas/ServiceStatus'
+            clickhouse:
+              $ref: '#/components/schemas/ServiceStatus'
+
+    ServiceStatus:
+      type: object
+      properties:
+        status:
+          type: string
+          enum: [up, down, degraded]
+        response_time_ms:
+          type: number
+        error:
+          type: string
+          description: Error message if status is not 'up'
+
+    MetricsResponse:
+      type: object
+      properties:
+        period:
+          type: string
+          description: Metrics time period
+        metrics:
+          type: object
+          properties:
+            requests_total:
+              type: integer
+            requests_per_minute:
+              type: number
+            avg_response_time_ms:
+              type: number
+            error_rate:
+              type: number
+            documents_processed:
+              type: integer
+            searches_performed:
+              type: integer
+
+    # Error Schemas
+    ErrorResponse:
+      type: object
+      properties:
+        error:
+          type: string
+          description: Error code
+        message:
+          type: string
+          description: Human-readable error message
+        details:
+          type: object
+          description: Additional error details
+        timestamp:
+          type: string
+          format: date-time
+
+    ValidationErrorResponse:
+      type: object
+      properties:
+        error:
+          type: string
+          example: "validation_error"
+        message:
+          type: string
+          example: "Validation failed"
+        details:
+          type: array
+          items:
+            type: object
+            properties:
+              field:
+                type: string
+                description: Field name that failed validation
+              message:
+                type: string
+                description: Validation error message
+              code:
+                type: string
+                description: Error code
+
+    # Response Schemas
+    SuccessResponse:
+      type: object
+      properties:
+        message:
+          type: string
+          description: Success message
+        data:
+          type: object
+          description: Optional response data
+
+    UserResponse:
+      type: object
+      properties:
+        user:
+          $ref: '#/components/schemas/User'
+
+    DocumentResponse:
+      type: object
+      properties:
+        document:
+          $ref: '#/components/schemas/Document'
+
+  responses:
+    UnauthorizedError:
+      description: Authentication required or invalid token
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          example:
+            error: "unauthorized"
+            message: "Authentication required"
+            timestamp: "2024-01-15T10:30:00Z"
+
+    ForbiddenError:
+      description: Insufficient permissions
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          example:
+            error: "forbidden"
+            message: "Insufficient permissions to access this resource"
+            timestamp: "2024-01-15T10:30:00Z"
+
+    NotFoundError:
+      description: Resource not found
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          example:
+            error: "not_found"
+            message: "The requested resource was not found"
+            timestamp: "2024-01-15T10:30:00Z"
+
+    ValidationError:
+      description: Request validation failed
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ValidationErrorResponse'
+          example:
+            error: "validation_error"
+            message: "Request validation failed"
+            details:
+              - field: "email"
+                message: "Invalid email format"
+                code: "invalid_format"
+              - field: "password"
+                message: "Password must be at least 8 characters long"
+                code: "too_short"
+            timestamp: "2024-01-15T10:30:00Z"
+
+    BadRequestError:
+      description: Bad request
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          example:
+            error: "bad_request"
+            message: "The request could not be processed"
+            timestamp: "2024-01-15T10:30:00Z"
+
+    RateLimitError:
+      description: Rate limit exceeded
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          example:
+            error: "rate_limit_exceeded"
+            message: "Too many requests. Please try again later."
+            details:
+              limit: 1000
+              window: "1 hour"
+              reset_time: "2024-01-15T11:00:00Z"
+            timestamp: "2024-01-15T10:30:00Z"
+
+    InternalServerError:
+      description: Internal server error
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          example:
+            error: "internal_server_error"
+            message: "An unexpected error occurred"
+            timestamp: "2024-01-15T10:30:00Z"
